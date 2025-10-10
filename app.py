@@ -2,15 +2,18 @@ import os
 import shutil
 import zipfile
 from io import BytesIO
-
 import requests
+import json
 import streamlit as st
-from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
 
 # ------------------- Streamlit 配置 -------------------
-st.set_page_config(page_title="锐瞳智能科技公司 - 小雨智能体",
-                   page_icon="💡", layout="centered")
+st.set_page_config(
+    page_title="锐瞳智能科技公司 - 小雨智能体",
+    page_icon="💡",
+    layout="centered"
+)
 
 # ------------------- DeepSeek API 配置 -------------------
 DEEPSEEK_API_KEY = "sk-8213b5bbd5054511aa940116e7e421dc"
@@ -18,36 +21,22 @@ DEEPSEEK_MODEL = "deepseek-chat"
 DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
 # ------------------- 路径配置 -------------------
-MODEL_DIR = "sentence-transformers/all-MiniLM-L6-v2"
-CHROMA_DIR = "./ruitongkeji"
-GITHUB_REPO = "https://github.com/zebinlu7-a11y/ruitong-chat-app"
+MODEL_DIR = "./models/all-MiniLM-L6-v2"
+CHROMA_DIR = "./models/ruitongkeji"
 
-# ------------------- 下载 GitHub 仓库（带进度条） -------------------
-def download_github_repo_progress(repo_url, extract_to="."):
+# ------------------- 自动下载 GitHub 仓库模型 -------------------
+def download_github_repo(repo_url, target_dir="."):
     try:
         zip_url = repo_url.rstrip("/") + "/archive/refs/heads/main.zip"
-        r = requests.get(zip_url, stream=True, timeout=60)
+        r = requests.get(zip_url, timeout=120)
         r.raise_for_status()
-        total_size = int(r.headers.get('content-length', 0))
-        chunk_size = 1024 * 1024  # 1MB
-        bytes_io = BytesIO()
-        progress_bar = st.progress(0)
-        downloaded = 0
-
-        for chunk in r.iter_content(chunk_size=chunk_size):
-            if chunk:
-                bytes_io.write(chunk)
-                downloaded += len(chunk)
-                progress_bar.progress(min(int(downloaded / total_size * 100), 100))
-
-        bytes_io.seek(0)
-        z = zipfile.ZipFile(bytes_io)
-        z.extractall(extract_to)
+        z = zipfile.ZipFile(BytesIO(r.content))
+        z.extractall(target_dir)
         st.success(f"仓库 {repo_url} 下载完成！")
     except Exception as e:
         st.error(f"下载 GitHub 仓库失败: {str(e)}")
 
-# ------------------- 整理 Chroma 文件 -------------------
+# ------------------- 确保 Chroma 文件夹完整 -------------------
 def prepare_chroma_dir(raw_dir, target_dir=CHROMA_DIR):
     os.makedirs(target_dir, exist_ok=True)
     for root, _, files in os.walk(raw_dir):
@@ -56,15 +45,27 @@ def prepare_chroma_dir(raw_dir, target_dir=CHROMA_DIR):
                 shutil.copy(os.path.join(root, f), os.path.join(target_dir, f))
     return target_dir
 
-# ------------------- 加载知识库 -------------------
+# ------------------- 加载向量库 -------------------
 @st.cache_resource
 def load_vectorstore():
-    if not os.path.exists(CHROMA_DIR):
-        st.info("知识库或模型文件不存在，正在自动下载，请稍等...")
-        download_github_repo_progress(GITHUB_REPO)
-        raw_chroma_dir = "./ruitong-chat-app-main/ruitongkeji"
-        prepare_chroma_dir(raw_chroma_dir, CHROMA_DIR)
+    global MODEL_DIR, CHROMA_DIR
 
+    # 检查模型和 Chroma 文件夹
+    if not os.path.exists(MODEL_DIR):
+        st.info("模型文件不存在，正在自动下载，请稍等...")
+        download_github_repo("https://github.com/zebinlu7-a11y/ruitong-chat-app")
+        MODEL_DIR = "./ruitong-chat-app-main/models/all-MiniLM-L6-v2"
+
+    if not os.path.exists(CHROMA_DIR) or len(os.listdir(CHROMA_DIR)) == 0:
+        st.info("知识库文件不存在，正在自动准备...")
+        raw_chroma = "./ruitong-chat-app-main/ruitongkeji"
+        if os.path.exists(raw_chroma):
+            prepare_chroma_dir(raw_chroma, CHROMA_DIR)
+        else:
+            st.warning("未找到知识库文件，请确认 GitHub 仓库中是否包含 Chroma 文件。")
+            return None
+
+    # 尝试加载向量库
     try:
         embeddings = HuggingFaceEmbeddings(model_name=MODEL_DIR)
         vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
@@ -73,18 +74,23 @@ def load_vectorstore():
         st.error(f"知识库加载失败: {str(e)}")
         return None
 
+# ------------------- 初始化向量库 -------------------
 vectorstore = load_vectorstore()
 if vectorstore:
     st.success("知识库加载完成！")
 else:
-    st.warning("知识库加载失败，请检查路径或数据。")
+    st.error("知识库加载失败，请检查路径或数据。")
 
 # ------------------- 系统提示 -------------------
 system_prompt = (
-    "你是锐瞳智能科技公司的智能助手，小雨。以第一人称与用户对话。"
-    "用户可查询知识库，我会基于上下文回答，生成自然、简洁的回答。"
-    "不显示知识库原文，回答仅涉及公司相关信息。"
-    "如果指令不认识，返回 '抱歉，我不认识这个命令'。"
+    "你是一个锐瞳智能科技公司的智能助手，名字叫小雨,跟用户对话请以第一人称的方式与用户沟通。"
+    "工作流程如下："
+    " 你可以实现对用户的问题回答，以第一人称的方式与用户沟通"
+    " 此外，用户可以输入查询或指令："
+    "   - 查询知识库：我会提供相关上下文，你基于上下文回答用户查询，生成自然、简洁的回答。"
+    "   - 如果指令不被识别，返回 '抱歉，我不认识这个命令'。"
+    " 基于提供的上下文回答问题，不要直接显示知识库内容，要结合原始知识库内容，回答用户有关你所在的锐瞳智能科技公司的信息，只用回答相关信息，不需要其他的语气词。"
+    " 例如：用户输入：你好，你回答：我在，用户输入：介绍一下你来自哪个公司，你回答：我来自锐瞳智能科技有限公司。"
 )
 
 # ------------------- 初始化会话状态 -------------------
@@ -95,7 +101,7 @@ if "messages" not in st.session_state:
 # ------------------- 调用 DeepSeek API -------------------
 def call_deepseek_api(user_input, context):
     try:
-        full_prompt = f"{system_prompt}\n\n用户查询：{user_input}\n知识库上下文：{context}\n生成自然、简洁的回答。"
+        full_prompt = f"{system_prompt}\n\n用户查询：{user_input}\n知识库上下文：{context}\n根据上下文回答用户的问题，生成自然、简洁的回答。"
         response = requests.post(
             f"{DEEPSEEK_API_BASE}/chat/completions",
             headers={
@@ -108,24 +114,31 @@ def call_deepseek_api(user_input, context):
                 "temperature": 0.7,
                 "max_tokens": 500
             },
-            timeout=30
+            timeout=60
         )
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        st.error(f"API 调用失败: {str(e)}")
+    except requests.RequestException as e:
+        st.error(f"API 调用失败: {str(e)}，请检查密钥或网络。")
         return "API 调用失败，请稍后重试。"
+    except (KeyError, json.JSONDecodeError) as e:
+        st.error(f"API 响应解析错误: {str(e)}")
+        return "API 响应错误，请联系管理员。"
 
 # ------------------- 聊天界面 -------------------
 st.title("💡 锐瞳智能科技公司 - 小雨智能体")
 st.write("你好，我是小雨助手，有什么需要帮助的吗？")
 
+# 显示历史聊天
 for msg in st.session_state.chat_history:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
+# 用户输入
 user_input = st.chat_input("请输入您的消息...", key="chat_input")
+
 if user_input:
+    # 显示用户消息
     with st.chat_message("user"):
         st.write(user_input)
     st.session_state.chat_history.append({"role": "user", "content": user_input})
@@ -137,13 +150,13 @@ if user_input:
     else:
         context = "知识库不可用"
 
-    # 调用 API
+    # 调用 API 并显示
     with st.chat_message("assistant"):
         with st.spinner("小雨正在思考..."):
             reply = call_deepseek_api(user_input, context)
             st.write(reply)
     st.session_state.chat_history.append({"role": "assistant", "content": reply})
 
-# ------------------- 操作指南 -------------------
+# ------------------- 操作指南（可选） -------------------
 if st.checkbox("操作指南"):
-    st.write("查找锐瞳科技相关信息，请咨询我")
+    st.write("会话状态:", "查找锐瞳科技相关信息，请咨询我")
