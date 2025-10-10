@@ -17,8 +17,16 @@ DEEPSEEK_MODEL = "deepseek-chat"  # 免费模型
 DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
 # ------------------- 路径配置 -------------------
-MODEL_DIR = "./models/all-MiniLM-L6-v2"
-CHROMA_DIR = "./ruitongkeji"
+if os.path.exists("./ruitong-chat-app/models/all-MiniLM-L6-v2"):
+    MODEL_DIR = "./ruitong-chat-app/models/all-MiniLM-L6-v2"
+    CHROMA_DIR = "./ruitong-chat-app/models/ruitongkeji"
+elif os.path.exists("./ruitong-chat-app-main/models/all-MiniLM-L6-v2"):
+    MODEL_DIR = "./ruitong-chat-app-main/models/all-MiniLM-L6-v2"
+    CHROMA_DIR = "./ruitong-chat-app-main/models/ruitongkeji"
+else:
+    MODEL_DIR = None
+    CHROMA_DIR = None
+
 
 # ------------------- 自动下载 GitHub 仓库 -------------------
 def download_github_repo(repo_url, extract_to="."):
