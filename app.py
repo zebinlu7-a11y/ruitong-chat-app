@@ -14,8 +14,8 @@ DEEPSEEK_MODEL = "deepseek-chat"  # 免费模型
 DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
 # 路径配置
-MODEL_DIR = os.getenv("MODEL_DIR", "./models/all-MiniLM-L6-v2")
-CHROMA_DIR = os.getenv("CHROMA_DIR", "./ruitongkeji")
+MODEL_DIR = "./models/all-MiniLM-L6-v2"
+CHROMA_DIR = "./ruitongkeji"
 
 # 加载知识库
 @st.cache_resource
