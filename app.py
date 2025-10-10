@@ -44,8 +44,8 @@ def load_vectorstore():
         st.info("知识库或模型文件不存在，正在自动下载，请稍等...")
         download_github_repo("https://github.com/zebinlu7-a11y/ruitong-chat-app")
         # 更新路径
-        MODEL_DIR = "./ruitong-chat-app-main/models/all-MiniLM-L6-v2"
-        CHROMA_DIR = "./ruitong-chat-app-main/ruitongkeji"
+        MODEL_DIR = "./ruitong-chat-app/models/all-MiniLM-L6-v2"
+        CHROMA_DIR = "./ruitong-chat-app/ruitongkeji"
 
     # 尝试加载向量库
     try:
