@@ -1,12 +1,12 @@
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
-import streamlit as st
 import os
 import requests
-import json
 import zipfile
 from io import BytesIO
 import shutil
+import streamlit as st
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
+import json
 
 # ------------------- Streamlit 配置 -------------------
 st.set_page_config(page_title="锐瞳智能科技公司 - 小雨智能体",
@@ -19,16 +19,14 @@ DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
 # ------------------- 路径配置 -------------------
 MODEL_DIR = "./models/all-MiniLM-L6-v2"
-CHROMA_DIR = "./ruitongkeji"
+CHROMA_DIR = "./models/ruitongkeji"
+GITHUB_REPO = "https://github.com/zebinlu7-a11y/ruitong-chat-app"
 
-# ------------------- 自动下载 GitHub 仓库 -------------------
+# ------------------- 下载并解压 GitHub 仓库 -------------------
 def download_github_repo(repo_url, extract_to="."):
-    """
-    下载 GitHub 仓库 zip 并解压
-    """
     try:
         zip_url = repo_url.rstrip("/") + "/archive/refs/heads/main.zip"
-        r = requests.get(zip_url, timeout=60)
+        r = requests.get(zip_url, timeout=120)
         r.raise_for_status()
         z = zipfile.ZipFile(BytesIO(r.content))
         z.extractall(extract_to)
@@ -36,11 +34,8 @@ def download_github_repo(repo_url, extract_to="."):
     except Exception as e:
         st.error(f"下载 GitHub 仓库失败: {str(e)}")
 
-# ------------------- 整理 Chroma 向量库 -------------------
-def prepare_chroma_dir(raw_dir, target_dir="./ruitongkeji"):
-    """
-    将 raw_dir 下的 .bin 和 .sqlite3 文件整理到 target_dir 根目录
-    """
+# ------------------- 整理 Chroma 文件 -------------------
+def prepare_chroma_dir(raw_dir, target_dir=CHROMA_DIR):
     os.makedirs(target_dir, exist_ok=True)
     for root, _, files in os.walk(raw_dir):
         for f in files:
@@ -56,15 +51,11 @@ def load_vectorstore():
     # 如果模型或知识库不存在，自动下载
     if not os.path.exists(MODEL_DIR) or not os.path.exists(CHROMA_DIR):
         st.info("知识库或模型文件不存在，正在自动下载，请稍等...")
-        download_github_repo("https://github.com/zebinlu7-a11y/ruitong-chat-app")
-
-        # 更新路径
-        repo_dir = "./ruitong-chat-app-main"
-        MODEL_DIR = os.path.join(repo_dir, "models", "all-MiniLM-L6-v2")
-        raw_chroma_dir = os.path.join(repo_dir, "ruitongkeji")
-
-        # 自动整理 Chroma 文件到同一个目录
-        CHROMA_DIR = prepare_chroma_dir(raw_chroma_dir)
+        download_github_repo(GITHUB_REPO)
+        # 更新路径到解压后的目录
+        MODEL_DIR = "./ruitong-chat-app-main/models/all-MiniLM-L6-v2"
+        raw_chroma = "./ruitong-chat-app-main/ruitongkeji"
+        CHROMA_DIR = prepare_chroma_dir(raw_chroma)
 
     # 尝试加载向量库
     try:
@@ -75,12 +66,12 @@ def load_vectorstore():
         st.error(f"知识库加载失败: {str(e)}")
         return None
 
-# ------------------- 初始化向量库 -------------------
+# 初始化向量库
 vectorstore = load_vectorstore()
 if vectorstore:
-    st.write("知识库加载完成！")
+    st.success("知识库加载完成！")
 else:
-    st.write("知识库加载失败，请检查路径或数据。")
+    st.error("知识库加载失败，请检查路径或数据。")
 
 # ------------------- 系统提示 -------------------
 system_prompt = (
@@ -115,7 +106,7 @@ def call_deepseek_api(user_input, context):
                 "temperature": 0.7,
                 "max_tokens": 500
             },
-            timeout=30
+            timeout=60
         )
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"].strip()
