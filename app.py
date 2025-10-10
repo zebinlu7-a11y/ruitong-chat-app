@@ -21,7 +21,8 @@ DEEPSEEK_MODEL = "deepseek-chat"
 DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
 # ------------------- 路径配置 -------------------
-CHROMA_DIR = "./ruitongkeji"
+MODEL_DIR = "./models/all-MiniLM-L6-v2"
+CHROMA_DIR = "./models/ruitongkeji"
 
 # ------------------- 自动下载 GitHub 仓库 -------------------
 def download_github_repo(repo_url, extract_to="."):
@@ -47,17 +48,22 @@ def prepare_chroma_dir(raw_dir, target_dir=CHROMA_DIR):
 # ------------------- 加载知识库 -------------------
 @st.cache_resource
 def load_vectorstore():
-    # 检查本地知识库是否存在
+    # 如果 Chroma 知识库不存在，自动下载
     if not os.path.exists(CHROMA_DIR):
         st.info("知识库不存在，正在自动下载，请稍等...")
         download_github_repo("https://github.com/zebinlu7-a11y/ruitong-chat-app")
-        # 假设解压后的 Chroma 文件在 ruitong-chat-app-main/ruitongkeji
-        raw_chroma_dir = "./ruitong-chat-app-main/ruitongkeji"
+        raw_chroma_dir = "./ruitong-chat-app-main/models/ruitongkeji"
         prepare_chroma_dir(raw_chroma_dir)
 
+    # 如果模型权重不存在，使用 HuggingFace 在线模型
+    if not os.path.exists(MODEL_DIR):
+        st.info("本地模型不存在，正在使用 HuggingFace 在线模型...")
+        MODEL_DIR_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+    else:
+        MODEL_DIR_NAME = MODEL_DIR
+
     try:
-        # 使用在线 HuggingFace Embeddings，避免本地权重问题
-        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        embeddings = HuggingFaceEmbeddings(model_name=MODEL_DIR_NAME)
         vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
         return vectorstore
     except Exception as e:
