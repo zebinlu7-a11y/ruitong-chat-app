@@ -1,10 +1,3 @@
-# 在代码顶部添加
-import os
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_API_KEY_HERE")  # 从环境变量读取密钥
-MODEL_DIR = os.getenv("MODEL_DIR", "./models/all-MiniLM-L6-v2")  # 部署时路径调整
-CHROMA_DIR = os.getenv("CHROMA_DIR", "./ruitongkeji")
-
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 import streamlit as st
@@ -21,7 +14,7 @@ DEEPSEEK_MODEL = "deepseek-chat"  # 免费模型
 DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
 # 路径配置
-MODEL_DIR = os.getenv("MODEL_DIR", "F:/models/all-MiniLM-L6-v2")
+MODEL_DIR = os.getenv("MODEL_DIR", "F:/xiaongrong/models/all-MiniLM-L6-v2")
 CHROMA_DIR = os.getenv("CHROMA_DIR", "F:/xiaongrong/ruitongkeji")
 
 # 加载知识库
