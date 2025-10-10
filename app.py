@@ -21,7 +21,6 @@ DEEPSEEK_MODEL = "deepseek-chat"
 DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
 # ------------------- 路径配置 -------------------
-MODEL_DIR = "./models/all-MiniLM-L6-v2"
 CHROMA_DIR = "./models/ruitongkeji"
 
 # ------------------- 自动下载 GitHub 仓库 -------------------
@@ -55,15 +54,11 @@ def load_vectorstore():
         raw_chroma_dir = "./ruitong-chat-app-main/models/ruitongkeji"
         prepare_chroma_dir(raw_chroma_dir)
 
-    # 如果模型权重不存在，使用 HuggingFace 在线模型
-    if not os.path.exists(MODEL_DIR):
-        st.info("本地模型不存在，正在使用 HuggingFace 在线模型...")
-        MODEL_DIR_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-    else:
-        MODEL_DIR_NAME = MODEL_DIR
+    # 使用在线 HuggingFace Embeddings 模型
+    MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
     try:
-        embeddings = HuggingFaceEmbeddings(model_name=MODEL_DIR_NAME)
+        embeddings = HuggingFaceEmbeddings(model_name=MODEL_NAME)
         vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
         return vectorstore
     except Exception as e:
