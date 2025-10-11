@@ -1,13 +1,13 @@
 import streamlit as st
 import json
 import os
+import re
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 import requests
 import zipfile
 from io import BytesIO
 import shutil
-from streamlit_cookies_manager import EncryptedCookieManager
 
 # ------------------- Streamlit 配置 -------------------
 st.set_page_config(
@@ -22,38 +22,35 @@ DEEPSEEK_MODEL = "deepseek-chat"
 DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
 # ------------------- 路径配置 -------------------
+CONVERSATIONS_DIR = "./conversations"  # 存储用户 JSON 文件的目录
 CHROMA_DIR = "./models/ruitongkeji"
 
-# ------------------- Cookies 配置 -------------------
-cookies = EncryptedCookieManager(
-    prefix="ruitong_chat/",  # Cookie 前缀
-    password="your-secret-password-123456"  # 用于加密 Cookies，替换为强密码
-)
-if not cookies.ready():
-    st.spinner("初始化 Cookies...")
-    st.stop()  # 等待 Cookies 初始化
+# ------------------- 确保用户目录存在 -------------------
+os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
 
-# ------------------- 保存/加载对话历史到 Cookies -------------------
-def save_conversations():
-    """保存会话到 Cookies"""
-    try:
-        # 限制会话数据大小（避免 Cookies 4KB 限制）
-        conversations = st.session_state.conversations
-        for session_id, conv in conversations.items():
-            # 每会话最多保留 10 条消息（可调整）
-            conv["messages"] = conv["messages"][-10:] if len(conv["messages"]) > 10 else conv["messages"]
-        cookies["conversations"] = json.dumps(conversations, ensure_ascii=False)
-        cookies.save()
-    except Exception as e:
-        st.error(f"保存对话到 Cookies 失败: {str(e)}")
+# ------------------- 用户名验证和保存/加载函数 -------------------
+def is_valid_username(username):
+    """验证用户名：只允许字母、数字、下划线"""
+    return bool(re.match(r'^[a-zA-Z0-9_]+$', username))
 
-def load_conversations():
-    """从 Cookies 加载会话"""
+def save_conversations(username):
+    """保存会话到用户专属 JSON 文件"""
     try:
-        if "conversations" in cookies:
-            return json.loads(cookies["conversations"])
+        conversations_file = os.path.join(CONVERSATIONS_DIR, f"conversations_{username}.json")
+        with open(conversations_file, "w", encoding="utf-8") as f:
+            json.dump(st.session_state.conversations, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        st.error(f"加载 Cookies 失败: {str(e)}")
+        st.error(f"保存对话失败: {str(e)}")
+
+def load_conversations(username):
+    """从用户专属 JSON 文件加载会话"""
+    try:
+        conversations_file = os.path.join(CONVERSATIONS_DIR, f"conversations_{username}.json")
+        if os.path.exists(conversations_file):
+            with open(conversations_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        st.error(f"加载对话失败: {str(e)}")
     return {}
 
 # ------------------- 自动下载 GitHub 仓库 -------------------
@@ -109,126 +106,148 @@ system_prompt = (
     " 例如用户问你叫什么名字，你回答：我叫小锐，来自锐瞳科技。"
 )
 
-# ------------------- 初始化会话状态（支持多会话） -------------------
-if "conversations" not in st.session_state:
-    # 从 Cookies 加载历史（如果存在）
-    st.session_state.conversations = load_conversations()
-    # 如果没有历史，初始化默认会话
-    if not st.session_state.conversations:
-        default_id = "default"
-        st.session_state.conversations = {
-            default_id: {
-                "title": "新对话",
+# ------------------- 用户选择/输入界面 -------------------
+if "username" not in st.session_state:
+    st.session_state.username = None
+
+if not st.session_state.username:
+    st.title("请选择或输入用户名")
+    existing_users = [f.replace("conversations_", "").replace(".json", "") for f in os.listdir(CONVERSATIONS_DIR) if f.startswith("conversations_") and f.endswith(".json")]
+    if existing_users:
+        selected_user = st.selectbox("已有用户：", existing_users)
+        if st.button("加载已有用户"):
+            st.session_state.username = selected_user
+            st.rerun()
+    new_user = st.text_input("或输入新用户名（仅限字母、数字、下划线）：")
+    if st.button("使用新用户名"):
+        if new_user and is_valid_username(new_user):
+            st.session_state.username = new_user
+            st.rerun()
+        else:
+            st.error("用户名无效或为空！")
+else:
+    # ------------------- 初始化会话状态（支持多会话） -------------------
+    if "conversations" not in st.session_state:
+        st.session_state.conversations = load_conversations(st.session_state.username)
+        if not st.session_state.conversations:
+            default_id = "default"
+            st.session_state.conversations = {
+                default_id: {
+                    "title": "新对话",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "assistant", "content": f"你好，我是小锐助手，有什么需要帮助的吗？"}
+                    ]
+                }
+            }
+        st.session_state.current_session = list(st.session_state.conversations.keys())[0]
+        save_conversations(st.session_state.username)
+
+    # ------------------- 调用 DeepSeek API -------------------
+    def call_deepseek_api(messages, context):
+        try:
+            user_messages = [msg for msg in messages if msg["role"] == "user"]
+            if user_messages:
+                last_user_msg = user_messages[-1]["content"]
+                if vectorstore:
+                    results = vectorstore.similarity_search(last_user_msg, k=3)
+                    context_str = "\n".join([doc.page_content for doc in results]) if results else "无相关知识库内容"
+                    messages[-1]["content"] += f"\n\n[知识库上下文，仅供参考：{context_str}]"
+            response = requests.post(
+                f"{DEEPSEEK_API_BASE}/chat/completions",
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+                },
+                json={
+                    "model": DEEPSEEK_MODEL,
+                    "messages": messages,
+                    "temperature": 0.7,
+                    "max_tokens": 500
+                },
+                timeout=30
+            )
+            response.raise_for_status()
+            return response.json()["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            st.error(f"API 调用失败: {str(e)}")
+            return "API 调用失败，请稍后重试。"
+
+    # ------------------- 侧边栏：会话历史 -------------------
+    with st.sidebar:
+        st.header(f"💬 {st.session_state.username} 的对话历史")
+        if st.button("新建对话", key="new_chat"):
+            new_id = f"chat_{len(st.session_state.conversations)}"
+            st.session_state.conversations[new_id] = {
+                "title": f"对话 {len(st.session_state.conversations) + 1}",
                 "messages": [
                     {"role": "system", "content": system_prompt},
-                    {"role": "assistant", "content": "你好，我是小锐助手，有什么需要帮助的吗？"}
+                    {"role": "assistant", "content": f"你好，我是小锐助手，有什么需要帮助的吗？"}
                 ]
             }
-        }
-    st.session_state.current_session = list(st.session_state.conversations.keys())[0]
-    save_conversations()  # 初始化后保存
+            st.session_state.current_session = new_id
+            save_conversations(st.session_state.username)
+            st.rerun()
 
-# ------------------- 调用 DeepSeek API -------------------
-def call_deepseek_api(messages, context):
-    try:
-        user_messages = [msg for msg in messages if msg["role"] == "user"]
-        if user_messages:
-            last_user_msg = user_messages[-1]["content"]
-            if vectorstore:
-                results = vectorstore.similarity_search(last_user_msg, k=3)
-                context_str = "\n".join([doc.page_content for doc in results]) if results else "无相关知识库内容"
-                #messages[-1]["content"] += f"\n\n[知识库上下文，仅供参考：{context_str}]"
-        response = requests.post(
-            f"{DEEPSEEK_API_BASE}/chat/completions",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
-            },
-            json={
-                "model": DEEPSEEK_MODEL,
-                "messages": messages,
-                "temperature": 0.7,
-                "max_tokens": 500
-            },
-            timeout=30
+        session_options = list(st.session_state.conversations.keys())
+        selected_session = st.radio(
+            "选择对话：",
+            options=session_options,
+            index=session_options.index(st.session_state.current_session),
+            format_func=lambda x: st.session_state.conversations[x]["title"]
         )
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        st.error(f"API 调用失败: {str(e)}")
-        return "API 调用失败，请稍后重试。"
+        if selected_session != st.session_state.current_session:
+            st.session_state.current_session = selected_session
+            st.rerun()
 
-# ------------------- 侧边栏：会话历史 -------------------
-with st.sidebar:
-    st.header("💬 对话历史")
-    if st.button("新建对话", key="new_chat"):
-        new_id = f"chat_{len(st.session_state.conversations)}"
-        st.session_state.conversations[new_id] = {
-            "title": f"对话 {len(st.session_state.conversations) + 1}",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "assistant", "content": "你好，我是小锐助手，有什么需要帮助的吗？"}
-            ]
-        }
-        st.session_state.current_session = new_id
-        save_conversations()  # 保存到 Cookies
-        st.rerun()
+        current_conv = st.session_state.conversations[st.session_state.current_session]
+        if len(current_conv["messages"]) > 2:
+            title = st.text_input("重命名对话：", value=current_conv["title"], key="rename")
+            if title != current_conv["title"]:
+                current_conv["title"] = title
+                save_conversations(st.session_state.username)
 
-    session_options = list(st.session_state.conversations.keys())
-    selected_session = st.radio(
-        "选择对话：",
-        options=session_options,
-        index=session_options.index(st.session_state.current_session),
-        format_func=lambda x: st.session_state.conversations[x]["title"]
-    )
-    if selected_session != st.session_state.current_session:
-        st.session_state.current_session = selected_session
-        st.rerun()
-
-    current_conv = st.session_state.conversations[st.session_state.current_session]
-    if len(current_conv["messages"]) > 2:
-        title = st.text_input("重命名对话：", value=current_conv["title"], key="rename")
-        if title != current_conv["title"]:
-            current_conv["title"] = title
-            save_conversations()  # 更新标题后保存
-
-    # 添加清除历史按钮
-    if st.button("清除所有对话历史", key="clear_history"):
-        st.session_state.conversations = {
-            "default": {
-                "title": "新对话",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "assistant", "content": "你好，我是小锐助手，有什么需要帮助的吗？"}
-                ]
+        if st.button("清除所有对话历史", key="clear_history"):
+            st.session_state.conversations = {
+                "default": {
+                    "title": "新对话",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "assistant", "content": f"你好，我是小锐助手，有什么需要帮助的吗？"}
+                    ]
+                }
             }
-        }
-        st.session_state.current_session = "default"
-        save_conversations()
-        st.rerun()
+            st.session_state.current_session = "default"
+            save_conversations(st.session_state.username)
+            st.rerun()
 
-# ------------------- 聊天界面 -------------------
-st.title("💡锐瞳智能科技公司——小锐智能体")
-current_messages = st.session_state.conversations[st.session_state.current_session]["messages"]
+        if st.button("切换用户", key="switch_user"):
+            st.session_state.username = None
+            st.session_state.conversations = None
+            st.rerun()
 
-for msg in current_messages:
-    if msg["role"] != "system":
-        with st.chat_message(msg["role"]):
-            st.write(msg["content"])
+    # ------------------- 聊天界面 -------------------
+    st.title(f"💡锐瞳智能科技公司——小锐智能体（欢迎，{st.session_state.username}）")
+    current_messages = st.session_state.conversations[st.session_state.current_session]["messages"]
 
-user_input = st.chat_input("请输入您的问题...", key=f"chat_input_{st.session_state.current_session}")
+    for msg in current_messages:
+        if msg["role"] != "system":
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
 
-if user_input:
-    with st.chat_message("user"):
-        st.write(user_input)
-    current_messages.append({"role": "user", "content": user_input})
-    with st.chat_message("assistant"):
-        with st.spinner("小锐正在思考..."):
-            reply = call_deepseek_api(current_messages, None)
-            st.write(reply)
-        current_messages.append({"role": "assistant", "content": reply})
-    save_conversations()  # 保存对话到 Cookies
+    user_input = st.chat_input("请输入您的问题...", key=f"chat_input_{st.session_state.current_session}")
 
-# ------------------- 操作指南 -------------------
-if st.checkbox("操作指南"):
-    st.write("查找锐瞳科技相关信息，请咨询小锐")
+    if user_input:
+        with st.chat_message("user"):
+            st.write(user_input)
+        current_messages.append({"role": "user", "content": user_input})
+        with st.chat_message("assistant"):
+            with st.spinner("小锐正在思考..."):
+                reply = call_deepseek_api(current_messages, None)
+                st.write(reply)
+            current_messages.append({"role": "assistant", "content": reply})
+        save_conversations(st.session_state.username)
+
+    # ------------------- 操作指南 -------------------
+    if st.checkbox("操作指南"):
+        st.write("查找锐瞳科技相关信息，请咨询小锐")
