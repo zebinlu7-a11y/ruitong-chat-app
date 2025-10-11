@@ -39,7 +39,7 @@ def save_conversations(username):
         conversations_file = os.path.join(CONVERSATIONS_DIR, f"conversations_{username}.json")
         with open(conversations_file, "w", encoding="utf-8") as f:
             json.dump(st.session_state.conversations, f, ensure_ascii=False, indent=2)
-        st.success(f"对话保存到 {conversations_file}")
+        #st.success(f"对话保存到 {conversations_file}")
     except Exception as e:
         st.error(f"保存对话失败: {str(e)}")
 
@@ -49,7 +49,7 @@ def load_conversations(username):
         conversations_file = os.path.join(CONVERSATIONS_DIR, f"conversations_{username}.json")
         if os.path.exists(conversations_file):
             with open(conversations_file, "r", encoding="utf-8") as f:
-                st.info(f"加载对话从 {conversations_file}")
+                #st.info(f"加载对话从 {conversations_file}")
                 return json.load(f)
         else:
             st.warning(f"未找到 {conversations_file}")
@@ -81,7 +81,7 @@ def download_github_repo(repo_url, extract_to="."):
         r.raise_for_status()
         z = zipfile.ZipFile(BytesIO(r.content))
         z.extractall(extract_to)
-        st.success(f"仓库 {repo_url} 下载完成！")
+        #st.success(f"仓库 {repo_url} 下载完成！")
     except Exception as e:
         st.error(f"下载 GitHub 仓库失败: {str(e)}")
 
@@ -169,7 +169,7 @@ if not st.session_state.username:
             st.session_state.show_delete_confirmation = False  # 登录时重置
             st.rerun()
         else:
-            st.error("用户名无效或为空！")
+            st.error("用户名无效或为空（仅限字母、数字、下划线）！")
 else:
     # ------------------- 初始化会话状态（支持多会话） -------------------
     if "conversations" not in st.session_state or st.session_state.conversations is None:
