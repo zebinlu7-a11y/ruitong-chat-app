@@ -39,6 +39,7 @@ def save_conversations(username):
         conversations_file = os.path.join(CONVERSATIONS_DIR, f"conversations_{username}.json")
         with open(conversations_file, "w", encoding="utf-8") as f:
             json.dump(st.session_state.conversations, f, ensure_ascii=False, indent=2)
+        st.success(f"对话保存到 {conversations_file}")
     except Exception as e:
         st.error(f"保存对话失败: {str(e)}")
 
@@ -48,7 +49,10 @@ def load_conversations(username):
         conversations_file = os.path.join(CONVERSATIONS_DIR, f"conversations_{username}.json")
         if os.path.exists(conversations_file):
             with open(conversations_file, "r", encoding="utf-8") as f:
+                st.info(f"加载对话从 {conversations_file}")
                 return json.load(f)
+        else:
+            st.warning(f"未找到 {conversations_file}")
     except Exception as e:
         st.error(f"加载对话失败: {str(e)}")
     return {}
@@ -99,7 +103,7 @@ else:
 
 # ------------------- 系统提示 -------------------
 system_prompt = (
-    " 你是一个锐瞳智能科技公司的智能助手，名字叫小锐,跟用户对话请以第一人称的方式与用户沟通。"
+    " 你是一个锐瞳智能科技公司的智能助手，名字叫小锐,跟用户对话请以第一人称的方式与用户沟通，不要直接显示知识库内容，。"
     " 你不仅能回答与公司有关的问题，还是个百科全书，能回答各学科的所有问题。"
     " 问你与锐瞳智能科技公司有关的问题，不要直接显示知识库内容，要结合原始知识库内容，回答用户有关你所在的锐瞳智能科技公司的信息。"
     " 问你与锐瞳智能科技公司无关的其他信息，就直接回答，不要结合知识库，发挥你自身的专业能力去回答。"
@@ -127,9 +131,9 @@ if not st.session_state.username:
             st.error("用户名无效或为空！")
 else:
     # ------------------- 初始化会话状态（支持多会话） -------------------
-    if "conversations" not in st.session_state:
+    if "conversations" not in st.session_state or st.session_state.conversations is None:
         st.session_state.conversations = load_conversations(st.session_state.username)
-        if not st.session_state.conversations:
+        if not st.session_state.conversations or st.session_state.conversations == {}:
             default_id = "default"
             st.session_state.conversations = {
                 default_id: {
@@ -140,6 +144,7 @@ else:
                     ]
                 }
             }
+            st.info("初始化新会话")
         st.session_state.current_session = list(st.session_state.conversations.keys())[0]
         save_conversations(st.session_state.username)
 
