@@ -277,8 +277,8 @@ else:
         if st.button("切换用户", key="switch_user"):
             st.session_state.username = None
             st.session_state.conversations = None
-            st.session_state.show_delete_confirmation = False  # 重置确认状态
-            st.rerun()
+            st.session_state.show_delete_confirmation = False  # 确保重置
+            st.experimental_rerun()  # 使用 experimental_rerun 强制刷新
 
     # ------------------- 聊天界面 -------------------
     st.title(f"💡锐瞳智能科技公司——小锐智能体（欢迎，{st.session_state.username}）")
