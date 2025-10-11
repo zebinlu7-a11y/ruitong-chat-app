@@ -106,6 +106,7 @@ system_prompt = (
     " 你不仅能回答与公司有关的问题，还是个百科全书，能回答各学科的所有问题。"
     " 问你与锐瞳智能科技公司有关的问题，不要直接显示知识库内容，要结合原始知识库内容，回答用户有关你所在的锐瞳智能科技公司的信息。"
     " 问你与锐瞳智能科技公司无关的其他信息，就直接回答，不要结合知识库，发挥你自身的专业能力去回答。"
+    " 例如用户问你叫什么名字，你回答：我叫小锐，来自锐瞳科技。"
 )
 
 # ------------------- 初始化会话状态（支持多会话） -------------------
@@ -136,7 +137,7 @@ def call_deepseek_api(messages, context):
             if vectorstore:
                 results = vectorstore.similarity_search(last_user_msg, k=3)
                 context_str = "\n".join([doc.page_content for doc in results]) if results else "无相关知识库内容"
-                messages[-1]["content"] += f"\n\n[知识库上下文，仅供参考：{context_str}]"
+                #messages[-1]["content"] += f"\n\n[知识库上下文，仅供参考：{context_str}]"
         response = requests.post(
             f"{DEEPSEEK_API_BASE}/chat/completions",
             headers={
