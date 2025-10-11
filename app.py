@@ -60,12 +60,17 @@ def load_conversations(username):
 def delete_user(username):
     """删除指定用户的数据文件并重置状态"""
     conversations_file = os.path.join(CONVERSATIONS_DIR, f"conversations_{username}.json")
-    if os.path.exists(conversations_file):
-        os.remove(conversations_file)
+    try:
+        if os.path.exists(conversations_file):
+            os.remove(conversations_file)
+            st.success(f"成功删除用户 {username} 的数据文件: {conversations_file}")
+        else:
+            st.warning(f"用户 {username} 的数据文件不存在: {conversations_file}")
         st.session_state.username = None
         st.session_state.conversations = None
-        st.success(f"用户 {username} 已删除！")
         st.rerun()
+    except Exception as e:
+        st.error(f"删除用户 {username} 失败: {str(e)}")
 
 # ------------------- 自动下载 GitHub 仓库 -------------------
 def download_github_repo(repo_url, extract_to="."):
