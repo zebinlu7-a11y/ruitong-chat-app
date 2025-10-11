@@ -107,7 +107,7 @@ def load_vectorstore():
 
 vectorstore = load_vectorstore()
 if vectorstore:
-    st.success("知识库加载完成！")
+    st.success("锐瞳知识库加载完成！")
 else:
     st.error("知识库加载失败，请检查路径或数据。")
 
@@ -117,8 +117,8 @@ def get_full_knowledge_context(vectorstore):
         all_docs = vectorstore.get()  # 获取所有文档
         if all_docs and "documents" in all_docs:
             # 合并所有文档内容，限制长度以适应 token 限制
-            full_context = " ".join(doc[:200] for doc in all_docs["documents"])  # 取每段前200字符
-            return full_context[:4000]  # 限制总长度约4000字符（约1000 tokens）
+            full_context = " ".join(doc for doc in all_docs["documents"])  # 取每段前200字符
+            return full_context  # 限制总长度约4000字符（约1000 tokens）
     return "知识库内容不可用"
 
 # ------------------- 系统提示 -------------------
@@ -272,6 +272,7 @@ else:
         if st.button("切换用户", key="switch_user"):
             st.session_state.username = None
             st.session_state.conversations = None
+            st.session_state.show_delete_confirmation=False
             st.rerun()
 
     # ------------------- 聊天界面 -------------------
