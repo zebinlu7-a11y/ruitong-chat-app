@@ -2,7 +2,7 @@
 基于 Streamlit 和 DeepSeek API 的聊天助手。
 
 ## 访问
-https://ruitong-chat-app-dgitvwg99cef2izkmrkvad.streamlit.app/
+[https://ruitong-chat-app-dgitvwg99cef2izkmrkvad.streamlit.app/](https://ruitong-chat-app-dgitvwg99cef2izkmrkvad.streamlit.app/)
 
 ## 功能
 - 聊天交互
