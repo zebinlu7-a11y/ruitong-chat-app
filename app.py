@@ -1,18 +1,18 @@
+import streamlit as st
+import json
+import os
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
-import streamlit as st
-import os
 import requests
-import json
 import zipfile
 from io import BytesIO
 import shutil
 
 # ------------------- Streamlit 配置 -------------------
 st.set_page_config(
-    page_title="锐瞳智能科技有限公司————小锐智能体",
+    page_title="锐瞳智能科技有限公司———小锐智能体",
     page_icon="🤖",
-    layout="wide"  # 改为 wide 以支持侧边栏更好布局
+    layout="wide"
 )
 
 # ------------------- DeepSeek API 配置 -------------------
@@ -22,6 +22,20 @@ DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
 # ------------------- 路径配置 -------------------
 CHROMA_DIR = "./models/ruitongkeji"
+CONVERSATIONS_FILE = "./conversations.json"  # 新增：持久化文件路径
+
+# ------------------- 保存/加载对话历史 -------------------
+def save_conversations():
+    """保存会话到 JSON 文件"""
+    with open(CONVERSATIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(st.session_state.conversations, f, ensure_ascii=False, indent=2)
+
+def load_conversations():
+    """从 JSON 文件加载会话"""
+    if os.path.exists(CONVERSATIONS_FILE):
+        with open(CONVERSATIONS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
 # ------------------- 自动下载 GitHub 仓库 -------------------
 def download_github_repo(repo_url, extract_to="."):
@@ -47,16 +61,12 @@ def prepare_chroma_dir(raw_dir, target_dir=CHROMA_DIR):
 # ------------------- 加载知识库 -------------------
 @st.cache_resource
 def load_vectorstore():
-    # 如果 Chroma 知识库不存在，自动下载
     if not os.path.exists(CHROMA_DIR):
         st.info("知识库不存在，正在自动下载，请稍等...")
         download_github_repo("https://github.com/zebinlu7-a11y/ruitong-chat-app")
         raw_chroma_dir = "./ruitong-chat-app-main/models/ruitongkeji"
         prepare_chroma_dir(raw_chroma_dir)
-
-    # 使用在线 HuggingFace Embeddings 模型
     MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-
     try:
         embeddings = HuggingFaceEmbeddings(model_name=MODEL_NAME)
         vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
@@ -81,59 +91,32 @@ system_prompt = (
 
 # ------------------- 初始化会话状态（支持多会话） -------------------
 if "conversations" not in st.session_state:
-    st.session_state.conversations = {}  # {session_id: {"title": str, "messages": list}}
-    # 创建默认会话
-    default_id = "default"
-    st.session_state.conversations[default_id] = {
-        "title": "新对话",
-        "messages": [{"role": "system", "content": system_prompt}, {"role": "assistant", "content": "你好，我是小锐助手，有什么需要帮助的吗？"}]
-    }
-    st.session_state.current_session = default_id
-
-# 侧边栏：会话历史
-with st.sidebar:
-    st.header("💬对话历史")
-    if st.button("新建对话", key="new_chat"):
-        new_id = f"chat_{len(st.session_state.conversations)}"
-        st.session_state.conversations[new_id] = {
-            "title": f"对话 {len(st.session_state.conversations) + 1}",
-            "messages": [{"role": "system", "content": system_prompt}, {"role": "assistant", "content": "你好，我是小锐助手，有什么需要帮助的吗？"}]
+    # 从文件加载历史（如果存在）
+    st.session_state.conversations = load_conversations()
+    # 如果没有历史，初始化默认会话
+    if not st.session_state.conversations:
+        default_id = "default"
+        st.session_state.conversations = {
+            default_id: {
+                "title": "新对话",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "assistant", "content": "你好，我是小锐助手，有什么需要帮助的吗？"}
+                ]
+            }
         }
-        st.session_state.current_session = new_id
-        st.rerun()  # 刷新以加载新会话
+    st.session_state.current_session = list(st.session_state.conversations.keys())[0]
 
-    # 显示会话列表（可选择）
-    session_options = list(st.session_state.conversations.keys())
-    selected_session = st.radio(
-        "选择对话：",
-        options=session_options,
-        index=session_options.index(st.session_state.current_session),
-        format_func=lambda x: st.session_state.conversations[x]["title"]
-    )
-    if selected_session != st.session_state.current_session:
-        st.session_state.current_session = selected_session
-        st.rerun()
-
-    # 可选：重命名当前会话标题（基于第一条用户消息）
-    current_conv = st.session_state.conversations[st.session_state.current_session]
-    if len(current_conv["messages"]) > 2:  # 有用户消息后
-        title = st.text_input("重命名对话：", value=current_conv["title"], key="rename")
-        if title != current_conv["title"]:
-            current_conv["title"] = title
-
-# ------------------- 调用 DeepSeek API（传递完整历史） -------------------
+# ------------------- 调用 DeepSeek API -------------------
 def call_deepseek_api(messages, context):
     try:
-        # 构建提示：注入知识库上下文到用户消息中（仅当前查询）
         user_messages = [msg for msg in messages if msg["role"] == "user"]
         if user_messages:
             last_user_msg = user_messages[-1]["content"]
             if vectorstore:
                 results = vectorstore.similarity_search(last_user_msg, k=3)
                 context_str = "\n".join([doc.page_content for doc in results]) if results else "无相关知识库内容"
-                # 更新最后用户消息，注入上下文
                 messages[-1]["content"] += f"\n\n[知识库上下文，仅供参考：{context_str}]"
-
         response = requests.post(
             f"{DEEPSEEK_API_BASE}/chat/completions",
             headers={
@@ -142,7 +125,7 @@ def call_deepseek_api(messages, context):
             },
             json={
                 "model": DEEPSEEK_MODEL,
-                "messages": messages,  # 传递完整历史！
+                "messages": messages,
                 "temperature": 0.7,
                 "max_tokens": 500
             },
@@ -154,33 +137,61 @@ def call_deepseek_api(messages, context):
         st.error(f"API 调用失败: {str(e)}")
         return "API 调用失败，请稍后重试。"
 
-# ------------------- 聊天界面 -------------------
-st.title("💡锐瞳智能科技公司————小锐智能体")
+# ------------------- 侧边栏：会话历史 -------------------
+with st.sidebar:
+    st.header("💬 对话历史")
+    if st.button("新建对话", key="new_chat"):
+        new_id = f"chat_{len(st.session_state.conversations)}"
+        st.session_state.conversations[new_id] = {
+            "title": f"对话 {len(st.session_state.conversations) + 1}",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "assistant", "content": "你好，我是小锐助手，有什么需要帮助的吗？"}
+            ]
+        }
+        st.session_state.current_session = new_id
+        save_conversations()  # 保存到文件
+        st.rerun()
 
-# 获取当前会话消息
+    session_options = list(st.session_state.conversations.keys())
+    selected_session = st.radio(
+        "选择对话：",
+        options=session_options,
+        index=session_options.index(st.session_state.current_session),
+        format_func=lambda x: st.session_state.conversations[x]["title"]
+    )
+    if selected_session != st.session_state.current_session:
+        st.session_state.current_session = selected_session
+        st.rerun()
+
+    current_conv = st.session_state.conversations[st.session_state.current_session]
+    if len(current_conv["messages"]) > 2:
+        title = st.text_input("重命名对话：", value=current_conv["title"], key="rename")
+        if title != current_conv["title"]:
+            current_conv["title"] = title
+            save_conversations()  # 更新标题后保存
+
+# ------------------- 聊天界面 -------------------
+st.title("💡锐瞳智能科技公司——小锐智能体")
 current_messages = st.session_state.conversations[st.session_state.current_session]["messages"]
 
-# 显示聊天记录
 for msg in current_messages:
-    if msg["role"] != "system":  # 不显示系统提示
+    if msg["role"] != "system":
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-# 用户输入
 user_input = st.chat_input("请输入您的问题...", key=f"chat_input_{st.session_state.current_session}")
 
 if user_input:
-    # 添加用户消息
     with st.chat_message("user"):
         st.write(user_input)
     current_messages.append({"role": "user", "content": user_input})
-
-    # 调用 API（用完整 messages）
     with st.chat_message("assistant"):
         with st.spinner("小锐正在思考..."):
-            reply = call_deepseek_api(current_messages, None)  # context 已注入
+            reply = call_deepseek_api(current_messages, None)
             st.write(reply)
         current_messages.append({"role": "assistant", "content": reply})
+    save_conversations()  # 保存对话到文件
 
 # ------------------- 操作指南 -------------------
 if st.checkbox("操作指南"):
