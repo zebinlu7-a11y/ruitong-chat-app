@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import json
 import os
@@ -232,4 +231,3 @@ if user_input:
 # ------------------- 操作指南 -------------------
 if st.checkbox("操作指南"):
     st.write("查找锐瞳科技相关信息，请咨询小锐")
-```
