@@ -250,17 +250,16 @@ else:
             st.session_state.current_session = "default"
             save_conversations(st.session_state.username)
             st.rerun()
-
+            
         # --------------- 删除用户功能 -------------------
         if "show_delete_confirmation" not in st.session_state:
             st.session_state.show_delete_confirmation = False
-
+        
         if st.button("删除用户", key="delete_user"):
             st.session_state.show_delete_confirmation = True
-
+        
         if st.session_state.show_delete_confirmation:
             st.warning(f"确定要删除用户 '{st.session_state.username}' 吗？这将删除所有对话历史！")
-            st.session_state.show_delete_confirmation=False
             col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
                 if st.button("确定", key="confirm_delete"):
@@ -269,11 +268,11 @@ else:
                 if st.button("取消", key="cancel_delete"):
                     st.session_state.show_delete_confirmation = False
                     st.rerun()
-
+        
         if st.button("切换用户", key="switch_user"):
             st.session_state.username = None
             st.session_state.conversations = None
-            st.session_state.show_delete_confirmation=False
+            st.session_state.show_delete_confirmation = False  # 重置确认状态
             st.rerun()
 
     # ------------------- 聊天界面 -------------------
