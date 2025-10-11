@@ -2,4 +2,4 @@ streamlit
 langchain-community
 sentence-transformers
 chromadb
-requests
+streamlit-cookies-manager
