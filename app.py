@@ -269,6 +269,7 @@ else:
             with col1:
                 if st.button("确定", key="confirm_delete"):
                     delete_user(st.session_state.username)
+                    st.rerun()
             with col2:
                 if st.button("取消", key="cancel_delete"):
                     st.session_state.show_delete_confirmation = False
