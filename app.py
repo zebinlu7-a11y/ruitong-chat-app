@@ -57,6 +57,16 @@ def load_conversations(username):
         st.error(f"加载对话失败: {str(e)}")
     return {}
 
+def delete_user(username):
+    """删除指定用户的数据文件并重置状态"""
+    conversations_file = os.path.join(CONVERSATIONS_DIR, f"conversations_{username}.json")
+    if os.path.exists(conversations_file):
+        os.remove(conversations_file)
+        st.session_state.username = None
+        st.session_state.conversations = None
+        st.success(f"用户 {username} 已删除！")
+        st.rerun()
+
 # ------------------- 自动下载 GitHub 仓库 -------------------
 def download_github_repo(repo_url, extract_to="."):
     try:
@@ -103,11 +113,12 @@ else:
 
 # ------------------- 系统提示 -------------------
 system_prompt = (
-    " 你是一个锐瞳智能科技公司的智能助手，名字叫小锐,跟用户对话请以第一人称的方式与用户沟通，不要直接显示知识库内容，。"
-    " 你不仅能回答与公司有关的问题，还是个百科全书，能回答各学科的所有问题。"
-    " 问你与锐瞳智能科技公司有关的问题，不要直接显示知识库内容，要结合原始知识库内容，回答用户有关你所在的锐瞳智能科技公司的信息。"
-    " 问你与锐瞳智能科技公司无关的其他信息，就直接回答，不要结合知识库，发挥你自身的专业能力去回答。"
-    " 例如用户问你叫什么名字，你回答：我叫小锐，来自锐瞳科技。"
+    "你是一个锐瞳智能科技公司的智能助手，名字叫小锐，跟用户对话请以第一人称方式与用户沟通。"
+    "你不仅能回答与公司有关的问题，还是个百科全书，能回答各学科的所有问题。"
+    "当用户询问与锐瞳智能科技公司相关的内容时，结合你所具备的知识库信息，以自然语言回答，但不要直接引用或显示原始知识库文本。"
+    "当用户询问与公司无关的问题时，基于你自身的知识直接回答，不需参考知识库。"
+    "例如，用户问'你叫什么名字'，你回答：'我叫小锐，来自锐瞳科技。'"
+    "请根据对话语境智能判断是否需要调用知识库，保持回答流畅自然。"
 )
 
 # ------------------- 用户选择/输入界面 -------------------
@@ -155,9 +166,9 @@ else:
             if user_messages:
                 last_user_msg = user_messages[-1]["content"]
                 if vectorstore:
+                    # 内部检索知识库，但不显式注入
                     results = vectorstore.similarity_search(last_user_msg, k=3)
-                    context_str = "\n".join([doc.page_content for doc in results]) if results else "无相关知识库内容"
-                    messages[-1]["content"] += f"\n\n[知识库上下文，仅供参考：{context_str}]"
+                    # 不将结果直接添加到 messages，依赖 system_prompt 引导
             response = requests.post(
                 f"{DEEPSEEK_API_BASE}/chat/completions",
                 headers={
@@ -225,6 +236,24 @@ else:
             st.session_state.current_session = "default"
             save_conversations(st.session_state.username)
             st.rerun()
+
+        # --------------- 删除用户功能 -------------------
+        if "show_delete_confirmation" not in st.session_state:
+            st.session_state.show_delete_confirmation = False
+
+        if st.button("删除用户", key="delete_user"):
+            st.session_state.show_delete_confirmation = True
+
+        if st.session_state.show_delete_confirmation:
+            st.warning(f"确定要删除用户 '{st.session_state.username}' 吗？这将删除所有对话历史！")
+            col1, col2, col3 = st.columns([1, 1, 1])
+            with col1:
+                if st.button("确定", key="confirm_delete"):
+                    delete_user(st.session_state.username)
+            with col2:
+                if st.button("取消", key="cancel_delete"):
+                    st.session_state.show_delete_confirmation = False
+                    st.rerun()
 
         if st.button("切换用户", key="switch_user"):
             st.session_state.username = None
