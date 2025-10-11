@@ -111,15 +111,36 @@ if vectorstore:
 else:
     st.error("知识库加载失败，请检查路径或数据。")
 
+# ------------------- 获取全部知识库内容 -------------------
+def get_full_knowledge_context(vectorstore):
+    if vectorstore:
+        all_docs = vectorstore.get()  # 获取所有文档
+        if all_docs and "documents" in all_docs:
+            # 合并所有文档内容，限制长度以适应 token 限制
+            full_context = " ".join(doc[:200] for doc in all_docs["documents"])  # 取每段前200字符
+            return full_context[:4000]  # 限制总长度约4000字符（约1000 tokens）
+    return "知识库内容不可用"
+
 # ------------------- 系统提示 -------------------
-system_prompt = (
-    "你是一个锐瞳智能科技公司的智能助手，名字叫小锐，跟用户对话请以第一人称方式与用户沟通。"
-    "你不仅能回答与公司有关的问题，还是个百科全书，能回答各学科的所有问题。"
-    "当用户询问与锐瞳智能科技公司相关的内容时，结合你所具备的知识库信息，以自然语言回答，但不要直接引用或显示原始知识库文本。"
-    "当用户询问与公司无关的问题时，基于你自身的知识直接回答，不需参考知识库。"
-    "例如，用户问'你叫什么名字'，你回答：'我叫小锐，来自锐瞳科技。'"
-    "请根据对话语境智能判断是否需要调用知识库，保持回答流畅自然。"
-)
+if vectorstore:
+    full_context = get_full_knowledge_context(vectorstore)
+    system_prompt = (
+        f"你是一个锐瞳智能科技公司的智能助手，名字叫小锐，跟用户对话请以第一人称方式与用户沟通。"
+        f"你不仅能回答与公司有关的问题，还是个百科全书，能回答各学科的所有问题。"
+        f"当用户询问与锐瞳智能科技公司相关的内容时，结合以下内部知识库信息以自然语言回答，但不要直接引用或显示原始文本：\n[内部参考信息，仅供内部使用：{full_context}]\n"
+        f"当用户询问与公司无关的问题时，基于你自身的知识直接回答，不需参考知识库。"
+        f"例如，用户问'你叫什么名字'，你回答：'我叫小锐，来自锐瞳科技。'"
+        f"请根据对话语境智能判断是否需要调用知识库，保持回答流畅自然。"
+    )
+else:
+    system_prompt = (
+        "你是一个锐瞳智能科技公司的智能助手，名字叫小锐，跟用户对话请以第一人称方式与用户沟通。"
+        "你不仅能回答与公司有关的问题，还是个百科全书，能回答各学科的所有问题。"
+        "当用户询问与锐瞳智能科技公司相关的内容时，基于你自身的知识回答，因知识库不可用。"
+        "当用户询问与公司无关的问题时，基于你自身的知识直接回答。"
+        "例如，用户问'你叫什么名字'，你回答：'我叫小锐，来自锐瞳科技。'"
+        "请保持回答流畅自然。"
+    )
 
 # ------------------- 用户选择/输入界面 -------------------
 if "username" not in st.session_state:
@@ -162,13 +183,6 @@ else:
     # ------------------- 调用 DeepSeek API -------------------
     def call_deepseek_api(messages, context):
         try:
-            user_messages = [msg for msg in messages if msg["role"] == "user"]
-            if user_messages:
-                last_user_msg = user_messages[-1]["content"]
-                if vectorstore:
-                    # 内部检索知识库，但不显式注入
-                    results = vectorstore.similarity_search(last_user_msg, k=3)
-                    # 不将结果直接添加到 messages，依赖 system_prompt 引导
             response = requests.post(
                 f"{DEEPSEEK_API_BASE}/chat/completions",
                 headers={
