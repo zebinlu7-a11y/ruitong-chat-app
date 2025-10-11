@@ -193,7 +193,7 @@ else:
                     "model": DEEPSEEK_MODEL,
                     "messages": messages,
                     "temperature": 0.7,
-                    "max_tokens": 500
+                    "max_tokens": 800
                 },
                 timeout=30
             )
@@ -260,6 +260,7 @@ else:
 
         if st.session_state.show_delete_confirmation:
             st.warning(f"确定要删除用户 '{st.session_state.username}' 吗？这将删除所有对话历史！")
+            st.session_state.show_delete_confirmation=False
             col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
                 if st.button("确定", key="confirm_delete"):
