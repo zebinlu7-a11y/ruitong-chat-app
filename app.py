@@ -68,6 +68,7 @@ def delete_user(username):
             st.warning(f"用户 {username} 的数据文件不存在: {conversations_file}")
         st.session_state.username = None
         st.session_state.conversations = None
+        st.session_state.show_delete_confirmation = False  # 确保重置
         st.rerun()
     except Exception as e:
         st.error(f"删除用户 {username} 失败: {str(e)}")
@@ -150,6 +151,7 @@ else:
 # ------------------- 用户选择/输入界面 -------------------
 if "username" not in st.session_state:
     st.session_state.username = None
+    st.session_state.show_delete_confirmation = False  # 初始化时重置
 
 if not st.session_state.username:
     st.title("请选择或输入用户名")
@@ -158,11 +160,13 @@ if not st.session_state.username:
         selected_user = st.selectbox("已有用户：", existing_users)
         if st.button("加载已有用户"):
             st.session_state.username = selected_user
+            st.session_state.show_delete_confirmation = False  # 登录时重置
             st.rerun()
     new_user = st.text_input("或输入新用户名（仅限字母、数字、下划线）：")
     if st.button("使用新用户名"):
         if new_user and is_valid_username(new_user):
             st.session_state.username = new_user
+            st.session_state.show_delete_confirmation = False  # 登录时重置
             st.rerun()
         else:
             st.error("用户名无效或为空！")
@@ -269,7 +273,6 @@ else:
             with col1:
                 if st.button("确定", key="confirm_delete"):
                     delete_user(st.session_state.username)
-                    st.rerun()
             with col2:
                 if st.button("取消", key="cancel_delete"):
                     st.session_state.show_delete_confirmation = False
@@ -279,7 +282,7 @@ else:
             st.session_state.username = None
             st.session_state.conversations = None
             st.session_state.show_delete_confirmation = False  # 确保重置
-            st.experimental_rerun()  # 使用 experimental_rerun 强制刷新
+            st.rerun()
 
     # ------------------- 聊天界面 -------------------
     st.title(f"💡锐瞳智能科技公司——小锐智能体（欢迎，{st.session_state.username}）")
