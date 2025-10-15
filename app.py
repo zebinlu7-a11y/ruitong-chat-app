@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 # ------------------- DeepSeek API 配置 -------------------
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-8213b5bbd5054511aa940116e7e421dc")  # 建议用环境变量
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")  # 建议用环境变量
 DEEPSEEK_MODEL = "deepseek-chat"
 DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
