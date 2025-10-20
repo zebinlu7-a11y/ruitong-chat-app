@@ -1,5 +1,5 @@
 streamlit
-langchain-community
+langchain-community==0.2.16
 sentence-transformers
 chromadb
 streamlit-cookies-manager
