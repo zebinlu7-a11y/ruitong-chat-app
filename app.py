@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import os
 import re
+import tempfile
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 import requests
@@ -22,34 +23,41 @@ DEEPSEEK_MODEL = "deepseek-chat"
 DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
 # ------------------- 路径配置 -------------------
-CONVERSATIONS_DIR = "./conversations"  # 存储用户 JSON 文件的目录
-CHROMA_DIR = "./models/ruitongkeji"
+# 使用临时目录或脚本所在目录
+BASE_DIR = tempfile.gettempdir() if os.getenv("STREAMLIT_CLOUD") else os.path.abspath(os.path.dirname(__file__))
+CONVERSATIONS_DIR = os.path.join(BASE_DIR, "conversations")
+CHROMA_DIR = os.path.join(BASE_DIR, "models", "ruitongkeji")
+EMBEDDINGS_DIR = os.path.join(BASE_DIR, "models", "all-MiniLM-L6-v2")
 
 # ------------------- 确保用户目录存在 -------------------
-os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
+try:
+    os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
+    os.makedirs(CHROMA_DIR, exist_ok=True)
+    os.makedirs(EMBEDDINGS_DIR, exist_ok=True)
+except PermissionError as e:
+    st.error(f"权限错误，无法创建目录: {e}. 请检查路径 {BASE_DIR} 的权限或使用可写目录。")
+    st.stop()
+except Exception as e:
+    st.error(f"创建目录失败: {e}")
+    st.stop()
 
 # ------------------- 用户名验证和保存/加载函数 -------------------
 def is_valid_username(username):
-    """验证用户名：只允许字母、数字、下划线"""
     return bool(re.match(r'^[a-zA-Z0-9_]+$', username))
 
 def save_conversations(username):
-    """保存会话到用户专属 JSON 文件"""
     try:
         conversations_file = os.path.join(CONVERSATIONS_DIR, f"conversations_{username}.json")
         with open(conversations_file, "w", encoding="utf-8") as f:
             json.dump(st.session_state.conversations, f, ensure_ascii=False, indent=2)
-        #st.success(f"对话保存到 {conversations_file}")
     except Exception as e:
         st.error(f"保存对话失败: {str(e)}")
 
 def load_conversations(username):
-    """从用户专属 JSON 文件加载会话"""
     try:
         conversations_file = os.path.join(CONVERSATIONS_DIR, f"conversations_{username}.json")
         if os.path.exists(conversations_file):
             with open(conversations_file, "r", encoding="utf-8") as f:
-                #st.info(f"加载对话从 {conversations_file}")
                 return json.load(f)
         else:
             st.warning(f"未找到 {conversations_file}")
@@ -58,7 +66,6 @@ def load_conversations(username):
     return {}
 
 def delete_user(username):
-    """删除指定用户的数据文件并重置状态"""
     conversations_file = os.path.join(CONVERSATIONS_DIR, f"conversations_{username}.json")
     try:
         if os.path.exists(conversations_file):
@@ -68,7 +75,7 @@ def delete_user(username):
             st.warning(f"用户 {username} 的数据文件不存在: {conversations_file}")
         st.session_state.username = None
         st.session_state.conversations = None
-        st.session_state.show_delete_confirmation = False  # 确保重置
+        st.session_state.show_delete_confirmation = False
         st.rerun()
     except Exception as e:
         st.error(f"删除用户 {username} 失败: {str(e)}")
@@ -77,35 +84,100 @@ def delete_user(username):
 def download_github_repo(repo_url, extract_to="."):
     try:
         zip_url = repo_url.rstrip("/") + "/archive/refs/heads/main.zip"
+        st.write(f"尝试下载 {zip_url}")
         r = requests.get(zip_url, timeout=60)
         r.raise_for_status()
         z = zipfile.ZipFile(BytesIO(r.content))
-        z.extractall(extract_to)
-        #st.success(f"仓库 {repo_url} 下载完成！")
+        extract_path = os.path.join(extract_to, "temp_repo_download")
+        os.makedirs(extract_path, exist_ok=True)
+        z.extractall(extract_path)
+        st.success(f"仓库 {repo_url} 下载并解压到 {extract_path} 完成！")
+        repo_root = os.path.join(extract_path, [d for d in os.listdir(extract_path) if d.endswith("-main")][0])
+        st.write(f"检测到的仓库根目录: {repo_root}")
+        return repo_root
     except Exception as e:
         st.error(f"下载 GitHub 仓库失败: {str(e)}")
+        return None
 
 # ------------------- 准备 Chroma 知识库目录 -------------------
 def prepare_chroma_dir(raw_dir, target_dir=CHROMA_DIR):
-    os.makedirs(target_dir, exist_ok=True)
-    for root, _, files in os.walk(raw_dir):
-        for f in files:
-            if f.endswith((".bin", ".sqlite3")):
-                shutil.copy(os.path.join(root, f), os.path.join(target_dir, f))
+    if not os.path.exists(target_dir) or not any(f.endswith((".bin", ".sqlite3")) for f in os.listdir(target_dir)):
+        os.makedirs(target_dir, exist_ok=True)
+        copied_files = []
+        for root, _, files in os.walk(raw_dir):
+            for f in files:
+                if f.endswith((".bin", ".sqlite3")):
+                    source_path = os.path.join(root, f)
+                    dest_path = os.path.join(target_dir, f)
+                    shutil.copy(source_path, dest_path)
+                    copied_files.append(f)
+        st.write(f"复制到 Chroma 目录的文件: {copied_files}")
+    else:
+        st.write(f"Chroma 目录 {target_dir} 已存在且包含文件，无需复制。内容: {os.listdir(target_dir)}")
+    return target_dir
+
+# ------------------- 准备嵌入模型目录 -------------------
+def prepare_embeddings_dir(raw_dir, target_dir=EMBEDDINGS_DIR):
+    if not os.path.exists(target_dir) or not any(f.endswith((".json", ".bin", ".safetensors")) for f in os.listdir(target_dir)):
+        os.makedirs(target_dir, exist_ok=True)
+        copied_files = []
+        model_raw_path = os.path.join(raw_dir, "models", "all-MiniLM-L6-v2")
+        st.write(f"检查嵌入模型源路径: {model_raw_path}")
+        if os.path.exists(model_raw_path):
+            for root, _, files in os.walk(model_raw_path):
+                for f in files:
+                    if f.endswith((".json", ".bin", ".safetensors")):
+                        source_path = os.path.join(root, f)
+                        dest_path = os.path.join(target_dir, f)
+                        shutil.copy(source_path, dest_path)
+                        copied_files.append(f)
+            st.write(f"复制到嵌入模型目录的文件: {copied_files}")
+        else:
+            st.error(f"嵌入模型源目录 {model_raw_path} 不存在，请检查 GitHub 仓库结构或下载内容！")
+    else:
+        st.write(f"嵌入模型目录 {target_dir} 已存在且包含文件，无需复制。内容: {os.listdir(target_dir)}")
     return target_dir
 
 # ------------------- 加载知识库 -------------------
 @st.cache_resource
 def load_vectorstore():
-    if not os.path.exists(CHROMA_DIR):
-        st.info("知识库不存在，正在自动下载，请稍等...")
-        download_github_repo("https://github.com/zebinlu7-a11y/ruitong-chat-app")
-        raw_chroma_dir = "./ruitong-chat-app-main/models/ruitongkeji"
-        prepare_chroma_dir(raw_chroma_dir)
-    MODEL_NAME = "./ruitong-chat-app-main/models/all-MiniLM-L6-v2"
+    if CHROMA_DIR is None or EMBEDDINGS_DIR is None:
+        st.error(f"路径配置错误: CHROMA_DIR={CHROMA_DIR}, EMBEDDINGS_DIR={EMBEDDINGS_DIR}")
+        return None
+
+    st.write(f"初始 CHROMA_DIR: {os.path.exists(CHROMA_DIR)} - {os.listdir(CHROMA_DIR) if os.path.exists(CHROMA_DIR) else '不存在'}")
+    st.write(f"初始 EMBEDDINGS_DIR: {os.path.exists(EMBEDDINGS_DIR)} - {os.listdir(EMBEDDINGS_DIR) if os.path.exists(EMBEDDINGS_DIR) else '不存在'}")
+
+    if not os.path.exists(CHROMA_DIR) or not os.path.exists(EMBEDDINGS_DIR):
+        st.info("本地知识库或模型文件缺失，尝试从 GitHub 下载...")
+        download_path = download_github_repo("https://github.com/zebinlu7-a11y/ruitong-chat-app", extract_to=BASE_DIR)
+        if download_path:
+            prepare_chroma_dir(download_path)
+            prepare_embeddings_dir(download_path)
+        else:
+            st.error("GitHub 下载失败，无法继续加载知识库")
+            return None
+    else:
+        st.write(f"使用本地知识库 {CHROMA_DIR} 和嵌入模型 {EMBEDDINGS_DIR}")
+
+    if not os.path.exists(EMBEDDINGS_DIR) or not any(f.endswith((".json", ".bin", ".safetensors")) for f in os.listdir(EMBEDDINGS_DIR)):
+        st.error(f"嵌入模型目录 {EMBEDDINGS_DIR} 缺少必要文件，请检查！")
+        return None
+
     try:
-        embeddings = HuggingFaceEmbeddings(model_name=MODEL_NAME)
+        embeddings = HuggingFaceEmbeddings(
+            model_name=EMBEDDINGS_DIR,
+            model_kwargs={'device': 'cpu'},
+            trust_remote_code=True
+        )
+        st.write("嵌入模型加载成功！")
+    except Exception as e:
+        st.error(f"嵌入模型加载失败: {str(e)}")
+        return None
+
+    try:
         vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
+        st.write(f"知识库加载成功，文档数量: {vectorstore._collection.count()}")
         return vectorstore
     except Exception as e:
         st.error(f"知识库加载失败: {str(e)}")
@@ -120,11 +192,10 @@ else:
 # ------------------- 获取全部知识库内容 -------------------
 def get_full_knowledge_context(vectorstore):
     if vectorstore:
-        all_docs = vectorstore.get()  # 获取所有文档
+        all_docs = vectorstore.get()
         if all_docs and "documents" in all_docs:
-            # 合并所有文档内容，限制长度以适应 token 限制
-            full_context = " ".join(doc for doc in all_docs["documents"])  # 取每段前200字符
-            return full_context  # 限制总长度约4000字符（约1000 tokens）
+            full_context = " ".join(doc for doc in all_docs["documents"])
+            return full_context
     return "知识库内容不可用"
 
 # ------------------- 系统提示 -------------------
@@ -151,7 +222,7 @@ else:
 # ------------------- 用户选择/输入界面 -------------------
 if "username" not in st.session_state:
     st.session_state.username = None
-    st.session_state.show_delete_confirmation = False  # 初始化时重置
+    st.session_state.show_delete_confirmation = False
 
 if not st.session_state.username:
     st.title("请选择或输入用户名")
@@ -160,18 +231,17 @@ if not st.session_state.username:
         selected_user = st.selectbox("已有用户：", existing_users)
         if st.button("加载已有用户"):
             st.session_state.username = selected_user
-            st.session_state.show_delete_confirmation = False  # 登录时重置
+            st.session_state.show_delete_confirmation = False
             st.rerun()
     new_user = st.text_input("或输入新用户名（仅限字母、数字、下划线）：")
     if st.button("使用新用户名"):
         if new_user and is_valid_username(new_user):
             st.session_state.username = new_user
-            st.session_state.show_delete_confirmation = False  # 登录时重置
+            st.session_state.show_delete_confirmation = False
             st.rerun()
         else:
             st.error("用户名无效或为空（仅限字母、数字、下划线）！")
 else:
-    # ------------------- 初始化会话状态（支持多会话） -------------------
     if "conversations" not in st.session_state or st.session_state.conversations is None:
         st.session_state.conversations = load_conversations(st.session_state.username)
         if not st.session_state.conversations or st.session_state.conversations == {}:
@@ -189,21 +259,12 @@ else:
         st.session_state.current_session = list(st.session_state.conversations.keys())[0]
         save_conversations(st.session_state.username)
 
-    # ------------------- 调用 DeepSeek API -------------------
     def call_deepseek_api(messages, context):
         try:
             response = requests.post(
                 f"{DEEPSEEK_API_BASE}/chat/completions",
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
-                },
-                json={
-                    "model": DEEPSEEK_MODEL,
-                    "messages": messages,
-                    "temperature": 0.7,
-                    "max_tokens": 800
-                },
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
+                json={"model": DEEPSEEK_MODEL, "messages": messages, "temperature": 0.7, "max_tokens": 800},
                 timeout=30
             )
             response.raise_for_status()
@@ -212,7 +273,6 @@ else:
             st.error(f"API 调用失败: {str(e)}")
             return "API 调用失败，请稍后重试。"
 
-    # ------------------- 侧边栏：会话历史 -------------------
     with st.sidebar:
         st.header(f"💬 {st.session_state.username} 的对话历史")
         if st.button("新建对话", key="new_chat"):
@@ -259,14 +319,11 @@ else:
             st.session_state.current_session = "default"
             save_conversations(st.session_state.username)
             st.rerun()
-            
-        # --------------- 删除用户功能 -------------------
+
         if "show_delete_confirmation" not in st.session_state:
             st.session_state.show_delete_confirmation = False
-        
         if st.button("删除用户", key="delete_user"):
             st.session_state.show_delete_confirmation = True
-        
         if st.session_state.show_delete_confirmation:
             st.warning(f"确定要删除用户 '{st.session_state.username}' 吗？这将删除所有对话历史！")
             col1, col2, col3 = st.columns([1, 1, 1])
@@ -277,14 +334,12 @@ else:
                 if st.button("取消", key="cancel_delete"):
                     st.session_state.show_delete_confirmation = False
                     st.rerun()
-        
         if st.button("切换用户", key="switch_user"):
             st.session_state.username = None
             st.session_state.conversations = None
-            st.session_state.show_delete_confirmation = False  # 确保重置
+            st.session_state.show_delete_confirmation = False
             st.rerun()
 
-    # ------------------- 聊天界面 -------------------
     st.title(f"💡锐瞳智能科技公司——小锐智能体（欢迎，{st.session_state.username}）")
     current_messages = st.session_state.conversations[st.session_state.current_session]["messages"]
 
@@ -306,6 +361,5 @@ else:
             current_messages.append({"role": "assistant", "content": reply})
         save_conversations(st.session_state.username)
 
-    # ------------------- 操作指南 -------------------
     if st.checkbox("操作指南"):
         st.write("查找锐瞳科技相关信息，请咨询小锐")
