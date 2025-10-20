@@ -21,15 +21,17 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")  # 建议用环境变量
 DEEPSEEK_MODEL = "deepseek-chat"
 DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
-# ------------------- 路径配置 -------------------
-CONVERSATIONS_DIR = "./conversations"  # 存储用户 JSON 文件的目录
-CHROMA_DIR = "./models/ruitongkeji"     # 本地 Chroma 知识库路径
-EMBEDDINGS_DIR = "./models/all-MiniLM-L6-v2"  # 本地嵌入模型路径
+# ------------------- 绝对路径配置 -------------------
+# 根据你的本地环境调整以下路径
+BASE_DIR = "/home/user/ruitong-chat-app"  # 替换为你的项目根目录绝对路径
+CONVERSATIONS_DIR = os.path.join(BASE_DIR, "conversations")  # 存储用户 JSON 文件的目录
+CHROMA_DIR = os.path.join(BASE_DIR, "models", "ruitongkeji")  # 本地 Chroma 知识库绝对路径
+EMBEDDINGS_DIR = os.path.join(BASE_DIR, "models", "all-MiniLM-L6-v2")  # 本地嵌入模型绝对路径
 
 # ------------------- 确保用户目录存在 -------------------
 os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
 os.makedirs(CHROMA_DIR, exist_ok=True)
-os.makedirs(EMBEDDINGS_DIR, exist_ok=True)  # 确保嵌入模型目录存在
+os.makedirs(EMBEDDINGS_DIR, exist_ok=True)
 
 # ------------------- 用户名验证和保存/加载函数 -------------------
 def is_valid_username(username):
@@ -80,16 +82,17 @@ def delete_user(username):
 def download_github_repo(repo_url, extract_to="."):
     try:
         zip_url = repo_url.rstrip("/") + "/archive/refs/heads/main.zip"
+        st.write(f"尝试下载 {zip_url}")
         r = requests.get(zip_url, timeout=60)
         r.raise_for_status()
         z = zipfile.ZipFile(BytesIO(r.content))
         z.extractall(extract_to)
         st.success(f"仓库 {repo_url} 下载完成！")
         st.write(f"解压目录内容: {os.listdir(extract_to)}")  # 调试信息
+        return True
     except Exception as e:
         st.error(f"下载 GitHub 仓库失败: {str(e)}")
         return False
-    return True
 
 # ------------------- 准备 Chroma 知识库目录 -------------------
 def prepare_chroma_dir(raw_dir, target_dir=CHROMA_DIR):
@@ -105,7 +108,7 @@ def prepare_chroma_dir(raw_dir, target_dir=CHROMA_DIR):
                     copied_files.append(f)
         st.write(f"复制到 Chroma 目录的文件: {copied_files}")
     else:
-        st.write(f"Chroma 目录 {target_dir} 已存在且包含文件，无需复制。")
+        st.write(f"Chroma 目录 {target_dir} 已存在且包含文件，无需复制。内容: {os.listdir(target_dir)}")
     return target_dir
 
 # ------------------- 准备嵌入模型目录 -------------------
@@ -113,7 +116,7 @@ def prepare_embeddings_dir(raw_dir, target_dir=EMBEDDINGS_DIR):
     if not os.path.exists(target_dir) or not any(f.endswith((".json", ".bin", ".safetensors")) for f in os.listdir(target_dir)):
         os.makedirs(target_dir, exist_ok=True)
         copied_files = []
-        model_raw_path = os.path.join(raw_dir, "models/all-MiniLM-L6-v2")
+        model_raw_path = os.path.join(raw_dir, "models", "all-MiniLM-L6-v2")
         if os.path.exists(model_raw_path):
             for root, _, files in os.walk(model_raw_path):
                 for f in files:
@@ -126,24 +129,28 @@ def prepare_embeddings_dir(raw_dir, target_dir=EMBEDDINGS_DIR):
         else:
             st.error(f"嵌入模型源目录 {model_raw_path} 不存在，请检查 GitHub 仓库！")
     else:
-        st.write(f"嵌入模型目录 {target_dir} 已存在且包含文件，无需复制。")
+        st.write(f"嵌入模型目录 {target_dir} 已存在且包含文件，无需复制。内容: {os.listdir(target_dir)}")
     return target_dir
 
 # ------------------- 加载知识库 -------------------
 @st.cache_resource
 def load_vectorstore():
-    # 确保路径非 None 并存在
+    # 确保路径非 None
     if CHROMA_DIR is None or EMBEDDINGS_DIR is None:
-        st.error("路径配置错误：CHROMA_DIR 或 EMBEDDINGS_DIR 为 None")
+        st.error(f"路径配置错误: CHROMA_DIR={CHROMA_DIR}, EMBEDDINGS_DIR={EMBEDDINGS_DIR}")
         return None
+
+    # 检查初始路径状态
+    st.write(f"初始 CHROMA_DIR: {os.path.exists(CHROMA_DIR)} - {os.listdir(CHROMA_DIR) if os.path.exists(CHROMA_DIR) else '不存在'}")
+    st.write(f"初始 EMBEDDINGS_DIR: {os.path.exists(EMBEDDINGS_DIR)} - {os.listdir(EMBEDDINGS_DIR) if os.path.exists(EMBEDDINGS_DIR) else '不存在'}")
 
     if not os.path.exists(CHROMA_DIR) or not os.path.exists(EMBEDDINGS_DIR):
         st.info("本地知识库或模型文件缺失，尝试从 GitHub 下载...")
-        if not download_github_repo("https://github.com/zebinlu7-a11y/ruitong-chat-app"):
+        if not download_github_repo("https://github.com/zebinlu7-a11y/ruitong-chat-app", extract_to=BASE_DIR):
             st.error("GitHub 下载失败，无法继续加载知识库")
             return None
-        raw_chroma_dir = "./ruitong-chat-app-main/models/ruitongkeji"
-        raw_embeddings_dir = "./ruitong-chat-app-main/models/all-MiniLM-L6-v2"
+        raw_chroma_dir = os.path.join(BASE_DIR, "ruitong-chat-app-main", "models", "ruitongkeji")
+        raw_embeddings_dir = os.path.join(BASE_DIR, "ruitong-chat-app-main", "models", "all-MiniLM-L6-v2")
         prepare_chroma_dir(raw_chroma_dir)
         prepare_embeddings_dir(raw_embeddings_dir)
     else:
@@ -157,7 +164,7 @@ def load_vectorstore():
     # 加载嵌入模型
     try:
         embeddings = HuggingFaceEmbeddings(
-            model_name=EMBEDDINGS_DIR,  # 使用本地路径
+            model_name=EMBEDDINGS_DIR,  # 使用本地绝对路径
             model_kwargs={'device': 'cpu'},  # 确保在 CPU 上运行
             trust_remote_code=True  # 支持 safetensors 格式
         )
