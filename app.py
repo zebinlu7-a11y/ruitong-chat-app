@@ -23,10 +23,13 @@ DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
 # ------------------- 路径配置 -------------------
 CONVERSATIONS_DIR = "./conversations"  # 存储用户 JSON 文件的目录
-CHROMA_DIR = "./models/ruitongkeji"
+CHROMA_DIR = "./models/ruitongkeji"     # Chroma 数据库本地路径
+EMBEDDINGS_DIR = "./models/all-MiniLM-L6-v2"  # 嵌入模型本地路径
 
 # ------------------- 确保用户目录存在 -------------------
 os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
+os.makedirs(CHROMA_DIR, exist_ok=True)
+os.makedirs(EMBEDDINGS_DIR, exist_ok=True)  # 确保嵌入模型目录存在
 
 # ------------------- 用户名验证和保存/加载函数 -------------------
 def is_valid_username(username):
@@ -73,7 +76,7 @@ def delete_user(username):
     except Exception as e:
         st.error(f"删除用户 {username} 失败: {str(e)}")
 
-# ------------------- 自动下载 GitHub 仓库 -------------------
+# ------------------- 自动下载 GitHub 仓库（可选备份） -------------------
 def download_github_repo(repo_url, extract_to="."):
     try:
         zip_url = repo_url.rstrip("/") + "/archive/refs/heads/main.zip"
@@ -81,31 +84,78 @@ def download_github_repo(repo_url, extract_to="."):
         r.raise_for_status()
         z = zipfile.ZipFile(BytesIO(r.content))
         z.extractall(extract_to)
-        #st.success(f"仓库 {repo_url} 下载完成！")
+        st.success(f"仓库 {repo_url} 下载完成！")
+        # 调试：列出解压后的文件
+        st.write(f"解压文件列表: {os.listdir(extract_to)}")
     except Exception as e:
         st.error(f"下载 GitHub 仓库失败: {str(e)}")
 
 # ------------------- 准备 Chroma 知识库目录 -------------------
 def prepare_chroma_dir(raw_dir, target_dir=CHROMA_DIR):
-    os.makedirs(target_dir, exist_ok=True)
-    for root, _, files in os.walk(raw_dir):
-        for f in files:
-            if f.endswith((".bin", ".sqlite3")):
-                shutil.copy(os.path.join(root, f), os.path.join(target_dir, f))
+    if not os.path.exists(target_dir) or not any(f.endswith((".bin", ".sqlite3")) for f in os.listdir(target_dir)):
+        os.makedirs(target_dir, exist_ok=True)
+        copied_files = []
+        for root, _, files in os.walk(raw_dir):
+            for f in files:
+                if f.endswith((".bin", ".sqlite3")):
+                    shutil.copy(os.path.join(root, f), os.path.join(target_dir, f))
+                    copied_files.append(f)
+        st.write(f"复制到 Chroma 目录的文件: {copied_files}")
+    else:
+        st.write(f"Chroma 目录 {target_dir} 已存在且包含文件，无需复制。")
+    return target_dir
+
+# ------------------- 准备嵌入模型目录 -------------------
+def prepare_embeddings_dir(raw_dir, target_dir=EMBEDDINGS_DIR):
+    if not os.path.exists(target_dir) or not any(f.endswith((".json", ".bin", ".safetensors")) for f in os.listdir(target_dir)):
+        os.makedirs(target_dir, exist_ok=True)
+        copied_files = []
+        model_raw_path = os.path.join(raw_dir, "models/all-MiniLM-L6-v2")  # 调整为你的仓库模型路径
+        if os.path.exists(model_raw_path):
+            for root, _, files in os.walk(model_raw_path):
+                for f in files:
+                    if f.endswith((".json", ".bin", ".safetensors")):
+                        shutil.copy(os.path.join(root, f), os.path.join(target_dir, f))
+                        copied_files.append(f)
+            st.write(f"复制到嵌入模型目录的文件: {copied_files}")
+        else:
+            st.error(f"嵌入模型源目录 {model_raw_path} 不存在，请检查 GitHub 仓库！")
+    else:
+        st.write(f"嵌入模型目录 {target_dir} 已存在且包含文件，无需复制。")
     return target_dir
 
 # ------------------- 加载知识库 -------------------
 @st.cache_resource
 def load_vectorstore():
-    if not os.path.exists(CHROMA_DIR):
-        st.info("知识库不存在，正在自动下载，请稍等...")
-        download_github_repo("https://github.com/zebinlu7-a11y/ruitong-chat-app")
-        raw_chroma_dir = "./ruitong-chat-app-main/models/ruitongkeji"
+    repo_url = "https://github.com/zebinlu7-a11y/ruitong-chat-app"
+    raw_repo_dir = "./ruitong-chat-app-main"
+
+    # 优先检查本地文件是否存在
+    if not os.path.exists(CHROMA_DIR) or not os.path.exists(EMBEDDINGS_DIR):
+        st.info("本地知识库或模型文件缺失，尝试从 GitHub 下载...")
+        download_github_repo(repo_url)
+        raw_chroma_dir = os.path.join(raw_repo_dir, "models/ruitongkeji")
+        raw_embeddings_dir = os.path.join(raw_repo_dir, "models/all-MiniLM-L6-v2")
         prepare_chroma_dir(raw_chroma_dir)
-    MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+        prepare_embeddings_dir(raw_embeddings_dir)
+    else:
+        st.write(f"使用本地知识库 {CHROMA_DIR} 和嵌入模型 {EMBEDDINGS_DIR}")
+
+    # 加载嵌入模型
     try:
-        embeddings = HuggingFaceEmbeddings(model_name=MODEL_NAME)
+        embeddings = HuggingFaceEmbeddings(
+            model_name=EMBEDDINGS_DIR,  # 使用本地路径
+            model_kwargs={'device': 'cpu'}  # 确保在 CPU 上运行
+        )
+        st.write("嵌入模型加载成功！")
+    except Exception as e:
+        st.error(f"嵌入模型加载失败: {str(e)}")
+        return None
+
+    # 加载 Chroma 向量数据库
+    try:
         vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
+        st.write(f"知识库加载成功，文档数量: {vectorstore._collection.count()}")
         return vectorstore
     except Exception as e:
         st.error(f"知识库加载失败: {str(e)}")
@@ -120,11 +170,10 @@ else:
 # ------------------- 获取全部知识库内容 -------------------
 def get_full_knowledge_context(vectorstore):
     if vectorstore:
-        all_docs = vectorstore.get()  # 获取所有文档
+        all_docs = vectorstore.get()
         if all_docs and "documents" in all_docs:
-            # 合并所有文档内容，限制长度以适应 token 限制
-            full_context = " ".join(doc for doc in all_docs["documents"])  # 取每段前200字符
-            return full_context  # 限制总长度约4000字符（约1000 tokens）
+            full_context = " ".join(doc for doc in all_docs["documents"])
+            return full_context
     return "知识库内容不可用"
 
 # ------------------- 系统提示 -------------------
@@ -148,10 +197,12 @@ else:
         "请保持回答流畅自然。"
     )
 
+# 以下代码保持不变（省略了未修改的部分），请将原代码中的剩余部分粘贴过来继续使用
 # ------------------- 用户选择/输入界面 -------------------
 if "username" not in st.session_state:
     st.session_state.username = None
     st.session_state.show_delete_confirmation = False  # 初始化时重置
+
 
 if not st.session_state.username:
     st.title("请选择或输入用户名")
