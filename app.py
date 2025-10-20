@@ -102,7 +102,7 @@ def load_vectorstore():
         download_github_repo("https://github.com/zebinlu7-a11y/ruitong-chat-app")
         raw_chroma_dir = "./ruitong-chat-app-main/models/ruitongkeji"
         prepare_chroma_dir(raw_chroma_dir)
-    MODEL_NAME = ".model/all-MiniLM-L6-v2"
+    MODEL_NAME = "./model/all-MiniLM-L6-v2"
     try:
         embeddings = HuggingFaceEmbeddings(model_name=MODEL_NAME)
         vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
