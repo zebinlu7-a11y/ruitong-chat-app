@@ -565,21 +565,28 @@ def download_github_repo(repo_url, extract_to="."):
         st.error(f"下载 GitHub 仓库失败: {str(e)}")
 
 def prepare_chroma_dir(raw_dir, target_dir=CHROMA_DIR):
-    os.makedirs(target_dir, exist_ok=True)
-    for root, _, files in os.walk(raw_dir):
-        for f in files:
-            if f.endswith((".bin", ".sqlite3")):
-                shutil.copy(os.path.join(root, f), os.path.join(target_dir, f))
+    """完整复制 Chroma 向量库目录"""
+    import shutil
+    if os.path.exists(target_dir):
+        shutil.rmtree(target_dir)
+    shutil.copytree(raw_dir, target_dir)
     return target_dir
+
 
 # ------------------- 加载知识库 -------------------
 @st.cache_resource
 def load_vectorstore():
-    if not os.path.exists(CHROMA_DIR):
+    # 检查是否有完整的 Chroma 文件
+    has_sqlite = os.path.exists(os.path.join(CHROMA_DIR, "chroma.sqlite3"))
+    has_subdirs = any(os.path.isdir(os.path.join(CHROMA_DIR, d)) 
+                      for d in os.listdir(CHROMA_DIR) if os.path.isdir(os.path.join(CHROMA_DIR, d)))
+    
+    if not has_sqlite or not has_subdirs:
         st.info("知识库不存在，正在自动下载，请稍等...")
         download_github_repo("https://github.com/zebinlu7-a11y/ruitong-chat-app")
         prepare_chroma_dir("./ruitong-chat-app-main/models/ruitongkeji")
-    MODEL_NAME = "./data/BAAI/bge-small-zh-v1___5"
+    
+    MODEL_NAME = "BAAI/bge-small-zh-v1.5"  # 在线模型
     try:
         embeddings = HuggingFaceEmbeddings(model_name=MODEL_NAME)
         vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
@@ -587,6 +594,7 @@ def load_vectorstore():
     except Exception as e:
         st.error(f"知识库加载失败: {str(e)}")
         return None
+
 
 vectorstore = load_vectorstore()
 if vectorstore:
