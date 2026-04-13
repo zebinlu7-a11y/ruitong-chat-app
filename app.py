@@ -1,12 +1,12 @@
+import os
+# 解决 protobuf 版本兼容性问题（Streamlit Cloud 部署必需）
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
 import streamlit as st
 import json
-import os
 import re
 import time
 from datetime import datetime
-
-# 解决 protobuf 版本兼容问题
-os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 import requests
@@ -623,11 +623,11 @@ def load_bm25_index():
 @st.cache_resource
 def load_reranker():
     try:
+        from modelscope import snapshot_download
         from transformers import AutoTokenizer, AutoModelForSequenceClassification
-        # 直接从 HuggingFace 下载，不用 modelscope
-        model_name = "BAAI/bge-reranker-base"
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        model_dir = snapshot_download("BAAI/bge-reranker-base", cache_dir="./models")
+        tokenizer = AutoTokenizer.from_pretrained(model_dir)
+        model = AutoModelForSequenceClassification.from_pretrained(model_dir)
         model.eval()
         return tokenizer, model
     except Exception as e:
