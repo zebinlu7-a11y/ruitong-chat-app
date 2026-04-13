@@ -1,0 +1,16 @@
+streamlit
+langchain-community
+langchain
+sentence-transformers
+chromadb
+streamlit-cookies-manager
+pypdf
+docx2txt
+unstructured
+python-docx
+pymupdf
+transformers>=4.35.0
+modelscope
+rank_bm25
+numpy
+protobuf>=3.20.0,<4.0.0
