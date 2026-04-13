@@ -556,46 +556,45 @@ def build_system_prompt(username):
         base += f"\n\n【关于该用户的长期记忆，请参考但不要主动提及】\n{facts_str}"
     return base
 
-# ------------------- 自动下载 GitHub 仓库 -------------------
-def download_github_repo(repo_url, extract_to="."):
-    try:
-        zip_url = repo_url.rstrip("/") + "/archive/refs/heads/main.zip"
-        r = requests.get(zip_url, timeout=60)
-        r.raise_for_status()
-        z = zipfile.ZipFile(BytesIO(r.content))
-        z.extractall(extract_to)
-    except Exception as e:
-        st.error(f"下载 GitHub 仓库失败: {str(e)}")
-
-def prepare_chroma_dir(raw_dir, target_dir=CHROMA_DIR):
-    """完整复制 Chroma 向量库目录"""
-    import shutil
-    if os.path.exists(target_dir):
-        shutil.rmtree(target_dir)
-    shutil.copytree(raw_dir, target_dir)
-    return target_dir
-
-
 # ------------------- 加载知识库 -------------------
 @st.cache_resource
 def load_vectorstore():
-    # 检查是否有完整的 Chroma 文件
-    has_sqlite = os.path.exists(os.path.join(CHROMA_DIR, "chroma.sqlite3"))
+    """加载知识库向量库（文件已包含在 GitHub 仓库中）"""
+    
+    # 检查 Chroma 目录是否存在
+    if not os.path.exists(CHROMA_DIR):
+        st.error(f"知识库目录不存在: {CHROMA_DIR}")
+        return None
+    
+    # 检查必要文件
+    sqlite_path = os.path.join(CHROMA_DIR, "chroma.sqlite3")
+    if not os.path.exists(sqlite_path):
+        st.error(f"SQLite 文件不存在: {sqlite_path}")
+        return None
+    
+    # 检查子目录
     has_subdirs = any(os.path.isdir(os.path.join(CHROMA_DIR, d)) 
                       for d in os.listdir(CHROMA_DIR) if os.path.isdir(os.path.join(CHROMA_DIR, d)))
+    if not has_subdirs:
+        st.error("Chroma 向量子目录不存在")
+        return None
     
-    if not has_sqlite or not has_subdirs:
-        st.info("知识库不存在，正在自动下载，请稍等...")
-        download_github_repo("https://github.com/zebinlu7-a11y/ruitong-chat-app")
-        prepare_chroma_dir("./ruitong-chat-app-main/models/ruitongkeji")
+    # 打印文件信息用于调试
+    sqlite_size = os.path.getsize(sqlite_path)
+    st.info(f"知识库文件大小: {sqlite_size/1024:.1f} KB")
     
-    MODEL_NAME = "BAAI/bge-small-zh-v1.5"  # 在线模型
+    MODEL_NAME = "BAAI/bge-small-zh-v1.5"
     try:
         embeddings = HuggingFaceEmbeddings(model_name=MODEL_NAME)
         vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
+        
+        # 验证向量库是否可用
+        count = vectorstore._collection.count()
+        st.success(f"知识库加载完成！共 {count} 条记录")
         return vectorstore
     except Exception as e:
         st.error(f"知识库加载失败: {str(e)}")
+        return None
         return None
 
 
