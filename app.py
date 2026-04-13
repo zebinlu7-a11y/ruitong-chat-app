@@ -6,13 +6,10 @@ import streamlit as st
 import json
 import re
 import time
+import requests
 from datetime import datetime
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
-import requests
-import zipfile
-from io import BytesIO
-import shutil
 import numpy as np
 
 # ------------------- 通用 API 调用函数（带重试+超时） -------------------
@@ -681,18 +678,81 @@ else:
         st.session_state.current_session = list(st.session_state.conversations.keys())[0]
         save_conversations(st.session_state.username)
 
-    # ------------------- DeepSeek API（带重试） -------------------
-    def call_deepseek_api(messages, context):
-        """生成回答的API调用"""
+    # ------------------- DeepSeek API（流式输出） -------------------
+    def call_deepseek_api_stream(messages, context):
+        """流式生成回答的API调用"""
         try:
             messages_to_send = list(messages)
             if context:
                 messages_to_send.insert(-1, {
                     "role": "system",
-                    "content": f"[检索到的相关知识库内容，仅供参考：{context[:60000]}]"  # 限制上下文长度
+                    "content": f"[检索到的相关知识库内容，仅供参考：{context[:60000]}]"
                 })
             
-            # 构建完整prompt
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+            }
+            
+            json_data = {
+                "model": DEEPSEEK_MODEL,
+                "messages": messages_to_send,
+                "temperature": 0.3,
+                "max_tokens": 1200,
+                "stream": True  # 启用流式输出
+            }
+            
+            response = requests.post(
+                f"{DEEPSEEK_API_BASE}/chat/completions",
+                headers=headers,
+                json=json_data,
+                stream=True,
+                timeout=120
+            )
+            response.raise_for_status()
+            
+            # 流式读取响应
+            full_response = ""
+            for line in response.iter_lines():
+                if line:
+                    line_text = line.decode('utf-8')
+                    if line_text.startswith("data: "):
+                        data_str = line_text[6:]
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(data_str)
+                            if "choices" in data and len(data["choices"]) > 0:
+                                delta = data["choices"][0].get("delta", {})
+                                if "content" in delta:
+                                    content = delta["content"]
+                                    full_response += content
+                                    yield content
+                        except json.JSONDecodeError:
+                            continue
+            
+            if full_response:
+                yield "__DONE__"  # 标记完成
+            else:
+                yield "抱歉，AI 服务暂时不可用，请稍后重试。"
+                yield "__DONE__"
+                
+        except Exception as e:
+            st.error(f"API 调用失败: {str(e)}")
+            yield "API 调用失败，请稍后重试。"
+            yield "__DONE__"
+
+    # ------------------- DeepSeek API（带重试，非流式） -------------------
+    def call_deepseek_api(messages, context):
+        """生成回答的API调用（非流式，用于摘要等）"""
+        try:
+            messages_to_send = list(messages)
+            if context:
+                messages_to_send.insert(-1, {
+                    "role": "system",
+                    "content": f"[检索到的相关知识库内容，仅供参考：{context[:60000]}]"
+                })
+            
             full_prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages_to_send])
             
             result = call_deepseek_api_retry(
@@ -1007,50 +1067,58 @@ else:
             st.write(user_input)
         current_messages.append({"role": "user", "content": user_input})
         with st.chat_message("assistant"):
-            with st.spinner("小锐正在思考..."):
-                # 获取当前会话对话
-                recent = [m for m in current_messages[:-1] if m["role"] in ("user", "assistant")]
-                
-                # 优化：计算一次上下文，避免重复生成摘要
-                total_chars = sum(len(m.get("content", "")) for m in recent)
-                total_tokens_est = total_chars // 2
-                use_direct = len(recent) <= 5 and total_tokens_est <= 800
-                
-                if use_direct:
-                    # 轮数<=5 且 token<800，用原始对话
-                    history_context = "\n".join(
-                        f"{'用户' if m['role']=='user' else '助手'}: {m['content']}"
-                        for m in recent
-                    )
-                else:
-                    # 轮数多或token多，生成摘要
+            # 获取当前会话对话
+            recent = [m for m in current_messages[:-1] if m["role"] in ("user", "assistant")]
+            
+            # 优化：计算一次上下文，避免重复生成摘要
+            total_chars = sum(len(m.get("content", "")) for m in recent)
+            total_tokens_est = total_chars // 2
+            use_direct = len(recent) <= 5 and total_tokens_est <= 800
+            
+            if use_direct:
+                # 轮数<=5 且 token<800，用原始对话
+                history_context = "\n".join(
+                    f"{'用户' if m['role']=='user' else '助手'}: {m['content']}"
+                    for m in recent
+                )
+            else:
+                # 轮数多或token多，生成摘要
+                with st.spinner("正在生成摘要..."):
                     summary = generate_session_summary(current_messages, st.session_state.current_session)
                     history_context = summary if summary else ""
+            
+            # Step 1: Query改写（简化版，不重复生成摘要）
+            search_query = user_input  # 默认使用原问题
+            if history_context or get_user_summaries(st.session_state.username):
+                # 只有在有上下文时才改写
+                user_facts = load_long_term_memory(st.session_state.username)
+                facts_context = "\n【用户偏好】：" + "\n".join(f"- {f}" for f in user_facts) if user_facts else ""
                 
-                # Step 1: Query改写（简化版，不重复生成摘要）
-                search_query = user_input  # 默认使用原问题
-                if history_context or get_user_summaries(st.session_state.username):
-                    # 只有在有上下文时才改写
-                    user_facts = load_long_term_memory(st.session_state.username)
-                    facts_context = "\n【用户偏好】：" + "\n".join(f"- {f}" for f in user_facts) if user_facts else ""
-                    
-                    prompt = (
-                        f"{facts_context}\n\n"
-                        f"对话历史：\n{history_context[:1000]}\n\n"
-                        f"用户问题：{user_input}\n\n"
-                        "请补全问题中的指代词，只返回改写后的问题。"
-                    )
-                    
-                    result = call_deepseek_api_retry(prompt=prompt, max_tokens=100, timeout=30)
-                    if result:
-                        search_query = result
+                prompt = (
+                    f"{facts_context}\n\n"
+                    f"对话历史：\n{history_context[:1000]}\n\n"
+                    f"用户问题：{user_input}\n\n"
+                    "请补全问题中的指代词，只返回改写后的问题。"
+                )
                 
-                # Step 2: 直接检索上下文（去掉判断步骤，减少1次API调用）
+                result = call_deepseek_api_retry(prompt=prompt, max_tokens=100, timeout=30)
+                if result:
+                    search_query = result
+            
+            # Step 2: 直接检索上下文
+            with st.spinner("正在检索知识库..."):
                 text_docs = retrieve_context(search_query, st.session_state.username, history_context, need_full_retrieval=True)
                 context_str = "\n".join(text_docs) if text_docs else None
-                reply = call_deepseek_api(current_messages, context_str)
-
-            st.write(reply)
+            
+            # 流式输出回答
+            reply = ""
+            message_placeholder = st.empty()
+            for chunk in call_deepseek_api_stream(current_messages, context_str):
+                if chunk == "__DONE__":
+                    break
+                reply += chunk
+                message_placeholder.write(reply + "▌")  # 闪烁光标效果
+            message_placeholder.write(reply)  # 最终显示
 
         current_messages.append({"role": "assistant", "content": reply})
         save_conversations(st.session_state.username)
