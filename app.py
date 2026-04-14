@@ -1221,12 +1221,35 @@ else:
     
     current_messages = st.session_state.conversations[st.session_state.current_session]["messages"]
 
-    for msg in current_messages:
+    # 初始化待处理的消息
+    if "pending_user_input" not in st.session_state:
+        st.session_state.pending_user_input = None
+    if "last_user_msg" not in st.session_state:
+        st.session_state.last_user_msg = None
+
+    # 显示消息
+    for i, msg in enumerate(current_messages):
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
                 st.write(msg["content"])
+                # 在最后一条助手消息后显示重新生成按钮
+                if msg["role"] == "assistant" and i == len(current_messages) - 1:
+                    if st.button("🔄 重新生成", key="regenerate_btn"):
+                        # 删除最后一条用户消息和助手回复
+                        if len(current_messages) >= 2:
+                            if current_messages[-1]["role"] == "assistant":
+                                current_messages.pop()
+                            if current_messages[-1]["role"] == "user":
+                                st.session_state.pending_user_input = current_messages.pop()["content"]
+                        save_conversations(st.session_state.username)
+                        st.rerun()
 
-    user_input = st.chat_input("请输入您的问题...", key=f"chat_input_{st.session_state.current_session}")
+    # 处理重新生成
+    if st.session_state.pending_user_input:
+        user_input = st.session_state.pending_user_input
+        st.session_state.pending_user_input = None
+    else:
+        user_input = st.chat_input("请输入您的问题...", key=f"chat_input_{st.session_state.current_session}")
 
     if user_input:
         with st.chat_message("user"):
