@@ -1221,35 +1221,67 @@ else:
     
     current_messages = st.session_state.conversations[st.session_state.current_session]["messages"]
 
-    # 初始化待处理的消息
-    if "pending_user_input" not in st.session_state:
-        st.session_state.pending_user_input = None
-    if "last_user_msg" not in st.session_state:
-        st.session_state.last_user_msg = None
+    # 初始化编辑状态
+    if "edit_mode" not in st.session_state:
+        st.session_state.edit_mode = False
+    if "editing_index" not in st.session_state:
+        st.session_state.editing_index = None
+    if "edit_text" not in st.session_state:
+        st.session_state.edit_text = ""
 
     # 显示消息
     for i, msg in enumerate(current_messages):
         if msg["role"] != "system":
-            with st.chat_message(msg["role"]):
-                st.write(msg["content"])
-                # 在最后一条助手消息后显示重新生成按钮
-                if msg["role"] == "assistant" and i == len(current_messages) - 1:
-                    if st.button("🔄 重新生成", key="regenerate_btn"):
-                        # 删除最后一条用户消息和助手回复
-                        if len(current_messages) >= 2:
+            # 检查是否在编辑模式
+            if st.session_state.edit_mode and st.session_state.editing_index == i:
+                # 显示编辑框
+                edited_text = st.text_area("编辑问题：", value=msg["content"], height=100, key=f"edit_input_{i}")
+                col1, col2 = st.columns([1, 4])
+                with col1:
+                    if st.button("✅ 确认", key=f"confirm_edit_{i}"):
+                        # 更新消息内容
+                        current_messages[i]["content"] = edited_text
+                        # 删除该消息之后的所有回复（assistant消息）
+                        while len(current_messages) > i + 1:
                             if current_messages[-1]["role"] == "assistant":
                                 current_messages.pop()
-                            if current_messages[-1]["role"] == "user":
-                                st.session_state.pending_user_input = current_messages.pop()["content"]
                         save_conversations(st.session_state.username)
+                        st.session_state.edit_mode = False
+                        st.session_state.editing_index = None
                         st.rerun()
+                with col2:
+                    if st.button("❌ 取消", key=f"cancel_edit_{i}"):
+                        st.session_state.edit_mode = False
+                        st.session_state.editing_index = None
+                        st.rerun()
+            else:
+                with st.chat_message(msg["role"]):
+                    st.write(msg["content"])
+                    # 在用户消息后显示编辑按钮
+                    if msg["role"] == "user" and i == len(current_messages) - 1:
+                        col1, col2 = st.columns([1, 1])
+                        with col1:
+                            if st.button("✏️ 编辑", key=f"edit_btn_{i}"):
+                                st.session_state.edit_mode = True
+                                st.session_state.editing_index = i
+                                st.session_state.edit_text = msg["content"]
+                                st.rerun()
+                        with col2:
+                            if st.button("🔄 重新生成", key=f"regenerate_btn_{i}"):
+                                # 删除最后一条助手回复
+                                if len(current_messages) > i + 1 and current_messages[-1]["role"] == "assistant":
+                                    current_messages.pop()
+                                save_conversations(st.session_state.username)
+                                st.rerun()
+                    # 在助手消息后显示重新生成按钮
+                    elif msg["role"] == "assistant" and i == len(current_messages) - 1:
+                        if st.button("🔄 重新生成", key="regenerate_last_btn"):
+                            current_messages.pop()  # 删除助手回复
+                            save_conversations(st.session_state.username)
+                            st.rerun()
 
-    # 处理重新生成
-    if st.session_state.pending_user_input:
-        user_input = st.session_state.pending_user_input
-        st.session_state.pending_user_input = None
-    else:
-        user_input = st.chat_input("请输入您的问题...", key=f"chat_input_{st.session_state.current_session}")
+    # 输入框
+    user_input = st.chat_input("请输入您的问题...", key=f"chat_input_{st.session_state.current_session}")
 
     if user_input:
         with st.chat_message("user"):
