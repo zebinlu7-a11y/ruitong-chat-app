@@ -13,18 +13,6 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 import numpy as np
 
-# ------------------- 过滤知识库中的图片引用 -------------------
-def filter_image_references(text):
-    """过滤掉知识库中的 @image:image.png 等图片引用"""
-    # 过滤 @image:xxx 格式的引用
-    text = re.sub(r'@image:[^\s,，.]+', '', text)
-    # 过滤 ![xxx](xxx) 格式的图片引用
-    text = re.sub(r'!\[.*?\]\(.*?\)', '', text)
-    # 清理多余空格和换行
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    text = re.sub(r' {2,}', ' ', text)
-    return text.strip()
-
 # ------------------- API Key 配置文件（定义在路径配置之后） -------------------
 API_KEY_FILE = None  # 稍后初始化
 
@@ -649,8 +637,8 @@ def load_vectorstore():
         return None
     
     # 打印文件信息用于调试
-    sqlite_size = os.path.getsize(sqlite_path)
-    st.info(f"知识库文件大小: {sqlite_size/1024:.1f} KB")
+    # sqlite_size = os.path.getsize(sqlite_path)
+    # st.info(f"知识库文件大小: {sqlite_size/1024:.1f} KB")
     
     MODEL_NAME = "BAAI/bge-small-zh-v1.5"
     try:
@@ -659,7 +647,7 @@ def load_vectorstore():
         
         # 验证向量库是否可用
         count = vectorstore._collection.count()
-        st.success(f"知识库加载完成！共 {count} 条记录")
+        # st.success(f"知识库加载完成！共 {count} 条记录")
         return vectorstore
     except Exception as e:
         st.error(f"知识库加载失败: {str(e)}")
@@ -668,10 +656,10 @@ def load_vectorstore():
 
 
 vectorstore = load_vectorstore()
-if vectorstore:
-    st.success("锐瞳知识库加载完成！")
-else:
-    st.error("知识库加载失败，请检查路径或数据。")
+# if vectorstore:
+#     st.success("锐瞳知识库加载完成！")
+# else:
+#     st.error("知识库加载失败，请检查路径或数据。")
 
 # ------------------- 加载 BM25 索引 -------------------
 @st.cache_resource
@@ -709,8 +697,9 @@ def load_bm25_index():
 #         return None, None
 
 # BM25 加载（必要）
-with st.spinner("正在加载 BM25 索引..."):
-    bm25_index, bm25_docs = load_bm25_index() if vectorstore else (None, [])
+# with st.spinner("正在加载 BM25 索引..."):
+#     bm25_index, bm25_docs = load_bm25_index() if vectorstore else (None, [])
+bm25_index, bm25_docs = load_bm25_index() if vectorstore else (None, [])
 
 # Reranker 加载（已禁用）
 # with st.spinner("正在加载 Reranker 模型..."):
@@ -938,11 +927,9 @@ else:
         
         knowledge_results = rerank(query, merged, top_k=5)
         
-        # 合并知识库结果（过滤图片引用）
+        # 合并知识库结果
         for text in knowledge_results:
-            filtered_text = filter_image_references(text)
-            if filtered_text:  # 只添加非空内容
-                results.append(f"[知识库] {filtered_text}")
+            results.append(f"[知识库] {text}")
         
         return results
 
@@ -1052,11 +1039,11 @@ else:
             # 显示 API Key（可切换）
             col1, col2 = st.columns([1, 1])
             with col1:
-                if st.button("👁️ 显示" if not st.session_state.show_api_key else "🙈 隐藏", key="toggle_show_key"):
+                if st.button("显示" if not st.session_state.show_api_key else "隐藏", key="toggle_show_key"):
                     st.session_state.show_api_key = not st.session_state.show_api_key
                     st.rerun()
             with col2:
-                if st.button("🗑️ 清除", key="clear_api_key"):
+                if st.button("🗑️清除", key="clear_api_key"):
                     delete_api_key(st.session_state.username)
                     st.session_state.api_key_input = ""
                     st.session_state.show_api_key = False
@@ -1081,7 +1068,7 @@ else:
         
         col_save, col_cancel = st.columns(2)
         with col_save:
-            if st.button("💾 保存", key="save_api_key_btn"):
+            if st.button("💾保存", key="save_api_key_btn"):
                 if api_key_input and api_key_input.strip():
                     if save_api_key(st.session_state.username, api_key_input.strip()):
                         st.session_state.api_key_input = ""
@@ -1090,7 +1077,7 @@ else:
                 else:
                     st.warning("请输入有效的 API Key")
         with col_cancel:
-            if st.button("🔄 重置", key="reset_api_key_btn"):
+            if st.button("🔄重置", key="reset_api_key_btn"):
                 st.session_state.api_key_input = ""
                 st.rerun()
         
@@ -1105,7 +1092,7 @@ else:
             # 如果没有 API Key，设置默认值（让代码不报错，但实际调用会失败）
             DEEPSEEK_API_KEY = ""
         
-        st.header(f"💬 {st.session_state.username} 的对话历史")
+        st.header(f"💬{st.session_state.username}的对话历史")
         if st.button("新建对话", key="new_chat"):
             # 对当前会话生成摘要并存入向量库
             old_session_id = st.session_state.current_session
@@ -1234,139 +1221,70 @@ else:
     
     current_messages = st.session_state.conversations[st.session_state.current_session]["messages"]
 
-    # 只显示欢迎消息，不显示系统消息
     for msg in current_messages:
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
                 st.write(msg["content"])
-    
-    # 检查是否是第一次对话（只有欢迎消息，没有用户问答）
-    user_messages = [m for m in current_messages if m["role"] == "user"]
-    is_first_turn = len(user_messages) == 0
-    
-    # 使用左右布局：左侧聊天区，右侧快捷按钮
-    chat_col, btn_col = st.columns([4, 1])
-    
-    with btn_col:
-        # 快捷回复按钮（仅在第一次时显示，垂直排列）
-        if is_first_turn:
-            st.markdown("### 快捷入口")
-            
-            quick_buttons = [
-                ("🏢 公司简介", "关于锐瞳智能科技有限公司的公司简介", "btn_company"),
-                ("📋 项目简介", "关于锐瞳智能科技有限公司的项目简介", "btn_project"),
-                ("💬 咨询合作", "我想咨询合作事宜", "btn_consult"),
-                ("👥 加入我们", "我想加入锐瞳智能科技", "btn_join")
-            ]
-            
-            for btn_text, query, btn_key in quick_buttons:
-                if st.button(btn_text, key=f"quick_{btn_key}", use_container_width=True):
-                    # 点击后直接发送消息
-                    user_input = query
-                    
-                    # 显示用户消息
-                    with st.container():
-                        with st.chat_message("user"):
-                            st.write(user_input)
-                    
-                    current_messages.append({"role": "user", "content": user_input})
-                    
-                    # 生成回复
-                    with st.chat_message("assistant"):
-                        reply = ""
-                        
-                        if query == "我想咨询合作事宜" or query == "我想加入锐瞳智能科技":
-                            # 固定回复
-                            reply = "请联系中国计量大学光学与电子科技学院 XXX 老师\n联系电话：123123\n微信号：ruitong"
-                            st.write(reply)
-                        else:
-                            # AI 模型回复
-                            recent = [m for m in current_messages[:-1] if m["role"] in ("user", "assistant")]
-                            history_context = "\n".join(
-                                f"{'用户' if m['role']=='user' else '助手'}: {m['content']}"
-                                for m in recent
-                            )
-                            
-                            with st.spinner("正在检索知识库..."):
-                                text_docs = retrieve_context(query, st.session_state.username, history_context, need_full_retrieval=True)
-                                context_str = "\n".join(text_docs) if text_docs else None
-                            
-                            message_placeholder = st.empty()
-                            for chunk in call_deepseek_api_stream(current_messages, context_str, api_key=current_api_key):
-                                if chunk == "__DONE__":
-                                    break
-                                reply += chunk
-                                message_placeholder.write(reply + "▌")
-                            message_placeholder.write(reply)
-                        
-                        current_messages.append({"role": "assistant", "content": reply})
-                        save_conversations(st.session_state.username)
-                        st.rerun()
-    
-    # 普通聊天输入框
+
     user_input = st.chat_input("请输入您的问题...", key=f"chat_input_{st.session_state.current_session}")
-    
+
     if user_input:
         with st.chat_message("user"):
             st.write(user_input)
         current_messages.append({"role": "user", "content": user_input})
         with st.chat_message("assistant"):
+            # 获取当前会话对话
+            recent = [m for m in current_messages[:-1] if m["role"] in ("user", "assistant")]
+            
+            # 优化：计算一次上下文，避免重复生成摘要
+            total_chars = sum(len(m.get("content", "")) for m in recent)
+            total_tokens_est = total_chars // 2
+            use_direct = len(recent) <= 5 and total_tokens_est <= 800
+            
+            if use_direct:
+                # 轮数<=5 且 token<800，用原始对话
+                history_context = "\n".join(
+                    f"{'用户' if m['role']=='user' else '助手'}: {m['content']}"
+                    for m in recent
+                )
+            else:
+                # 轮数多或token多，生成摘要
+                with st.spinner("正在生成摘要..."):
+                    summary = generate_session_summary(current_messages, st.session_state.current_session)
+                    history_context = summary if summary else ""
+            
+            # Step 1: Query改写（简化版，不重复生成摘要）
+            search_query = user_input  # 默认使用原问题
+            if history_context or get_user_summaries(st.session_state.username):
+                # 只有在有上下文时才改写
+                user_facts = load_long_term_memory(st.session_state.username)
+                facts_context = "\n【用户偏好】：" + "\n".join(f"- {f}" for f in user_facts) if user_facts else ""
+                
+                prompt = (
+                    f"{facts_context}\n\n"
+                    f"对话历史：\n{history_context[:1000]}\n\n"
+                    f"用户问题：{user_input}\n\n"
+                    "请补全问题中的指代词，只返回改写后的问题。"
+                )
+                
+                result = call_deepseek_api_retry(prompt=prompt, max_tokens=100, timeout=30)
+                if result:
+                    search_query = result
+            
+            # Step 2: 直接检索上下文
+            with st.spinner("正在检索知识库..."):
+                text_docs = retrieve_context(search_query, st.session_state.username, history_context, need_full_retrieval=True)
+                context_str = "\n".join(text_docs) if text_docs else None
+            
+            # 流式输出回答
             reply = ""
-            
-            # 检查是否是快捷回复
-            if user_input == "关于锐瞳智能科技有限公司的项目简介" or user_input == "关于锐瞳智能科技有限公司的公司简介":
-                is_intro_query = True
-            elif user_input == "我想咨询合作事宜" or user_input == "我想加入锐瞳智能科技":
-                reply = "请联系中国计量大学光学与电子科技学院 XXX 老师\n联系电话：123123\n微信号：ruitong"
-                is_intro_query = False
-            else:
-                is_intro_query = False
-            
-            if is_intro_query:
-                recent = [m for m in current_messages[:-1] if m["role"] in ("user", "assistant")]
-                total_chars = sum(len(m.get("content", "")) for m in recent)
-                total_tokens_est = total_chars // 2
-                use_direct = len(recent) <= 5 and total_tokens_est <= 800
-                
-                if use_direct:
-                    history_context = "\n".join(
-                        f"{'用户' if m['role']=='user' else '助手'}: {m['content']}"
-                        for m in recent
-                    )
-                else:
-                    with st.spinner("正在生成摘要..."):
-                        summary = generate_session_summary(current_messages, st.session_state.current_session)
-                        history_context = summary if summary else ""
-                
-                search_query = user_input
-                if history_context or get_user_summaries(st.session_state.username):
-                    user_facts = load_long_term_memory(st.session_state.username)
-                    facts_context = "\n【用户偏好】：" + "\n".join(f"- {f}" for f in user_facts) if user_facts else ""
-                    
-                    prompt = (
-                        f"{facts_context}\n\n"
-                        f"对话历史：\n{history_context[:1000]}\n\n"
-                        f"用户问题：{user_input}\n\n"
-                        "请补全问题中的指代词，只返回改写后的问题。"
-                    )
-                    
-                    result = call_deepseek_api_retry(prompt=prompt, max_tokens=100, timeout=30)
-                    if result:
-                        search_query = result
-                
-                with st.spinner("正在检索知识库..."):
-                    text_docs = retrieve_context(search_query, st.session_state.username, history_context, need_full_retrieval=True)
-                    context_str = "\n".join(text_docs) if text_docs else None
-                
-                message_placeholder = st.empty()
-                for chunk in call_deepseek_api_stream(current_messages, context_str, api_key=current_api_key):
-                    if chunk == "__DONE__":
-                        break
-                    reply += chunk
-                    message_placeholder.write(reply + "▌")
-                message_placeholder.write(reply)
-            else:
-                st.write(reply)
+            message_placeholder = st.empty()
+            for chunk in call_deepseek_api_stream(current_messages, context_str, api_key=current_api_key):
+                if chunk == "__DONE__":
+                    break
+                reply += chunk
+                message_placeholder.write(reply + "▌")  # 闪烁光标效果
+            message_placeholder.write(reply)  # 最终显示
 
         current_messages.append({"role": "assistant", "content": reply})
         save_conversations(st.session_state.username)
