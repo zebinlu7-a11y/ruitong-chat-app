@@ -1253,14 +1253,14 @@ else:
             st.markdown("### 快捷入口")
             
             quick_buttons = [
-                ("🏢 公司简介", "关于锐瞳智能科技有限公司的公司简介"),
-                ("📋 项目简介", "关于锐瞳智能科技有限公司的项目简介"),
-                ("💬 咨询合作", "我想咨询合作事宜"),
-                ("👥 加入我们", "我想加入锐瞳智能科技")
+                ("🏢 公司简介", "关于锐瞳智能科技有限公司的公司简介", "btn_company"),
+                ("📋 项目简介", "关于锐瞳智能科技有限公司的项目简介", "btn_project"),
+                ("💬 咨询合作", "我想咨询合作事宜", "btn_consult"),
+                ("👥 加入我们", "我想加入锐瞳智能科技", "btn_join")
             ]
             
-            for btn_text, query in quick_buttons:
-                if st.button(btn_text, key=f"quick_{query[:5]}", use_container_width=True):
+            for btn_text, query, btn_key in quick_buttons:
+                if st.button(btn_text, key=f"quick_{btn_key}", use_container_width=True):
                     # 点击后直接发送消息
                     user_input = query
                     
