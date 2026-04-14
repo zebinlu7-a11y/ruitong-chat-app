@@ -1244,51 +1244,67 @@ else:
     user_messages = [m for m in current_messages if m["role"] == "user"]
     is_first_turn = len(user_messages) == 0
     
-    # 快捷回复按钮（仅在第一次时显示）
-    if is_first_turn:
-        st.subheader("请选择您想了解的内容：")
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🏢 公司简介", key="btn_company", use_container_width=True):
-                st.session_state.selected_btn_company = True
-                st.rerun()
-        with col2:
-            if st.button("📋 项目简介", key="btn_project", use_container_width=True):
-                st.session_state.selected_btn_project = True
-                st.rerun()
-        
-        col3, col4 = st.columns(2)
-        with col3:
-            if st.button("💬 咨询合作", key="btn_consult", use_container_width=True):
-                st.session_state.selected_btn_consult = True
-                st.rerun()
-        with col4:
-            if st.button("👥 加入我们", key="btn_join", use_container_width=True):
-                st.session_state.selected_btn_join = True
-                st.rerun()
-        
-        st.divider()
+    # 使用左右布局：左侧聊天区，右侧快捷按钮
+    chat_col, btn_col = st.columns([4, 1])
     
-    # 处理快捷按钮点击
-    quick_reply_map = {
-        "selected_btn_company": "关于锐瞳智能科技有限公司的公司简介",
-        "selected_btn_project": "关于锐瞳智能科技有限公司的项目简介",
-        "selected_btn_consult": "我想咨询合作事宜",
-        "selected_btn_join": "我想加入锐瞳智能科技"
-    }
+    with btn_col:
+        # 快捷回复按钮（仅在第一次时显示，垂直排列）
+        if is_first_turn:
+            st.markdown("### 快捷入口")
+            
+            quick_buttons = [
+                ("🏢 公司简介", "关于锐瞳智能科技有限公司的公司简介"),
+                ("📋 项目简介", "关于锐瞳智能科技有限公司的项目简介"),
+                ("💬 咨询合作", "我想咨询合作事宜"),
+                ("👥 加入我们", "我想加入锐瞳智能科技")
+            ]
+            
+            for btn_text, query in quick_buttons:
+                if st.button(btn_text, key=f"quick_{query[:5]}", use_container_width=True):
+                    # 点击后直接发送消息
+                    user_input = query
+                    
+                    # 显示用户消息
+                    with st.container():
+                        with st.chat_message("user"):
+                            st.write(user_input)
+                    
+                    current_messages.append({"role": "user", "content": user_input})
+                    
+                    # 生成回复
+                    with st.chat_message("assistant"):
+                        reply = ""
+                        
+                        if query == "我想咨询合作事宜" or query == "我想加入锐瞳智能科技":
+                            # 固定回复
+                            reply = "请联系中国计量大学光学与电子科技学院 XXX 老师\n联系电话：123123\n微信号：ruitong"
+                            st.write(reply)
+                        else:
+                            # AI 模型回复
+                            recent = [m for m in current_messages[:-1] if m["role"] in ("user", "assistant")]
+                            history_context = "\n".join(
+                                f"{'用户' if m['role']=='user' else '助手'}: {m['content']}"
+                                for m in recent
+                            )
+                            
+                            with st.spinner("正在检索知识库..."):
+                                text_docs = retrieve_context(query, st.session_state.username, history_context, need_full_retrieval=True)
+                                context_str = "\n".join(text_docs) if text_docs else None
+                            
+                            message_placeholder = st.empty()
+                            for chunk in call_deepseek_api_stream(current_messages, context_str, api_key=current_api_key):
+                                if chunk == "__DONE__":
+                                    break
+                                reply += chunk
+                                message_placeholder.write(reply + "▌")
+                            message_placeholder.write(reply)
+                        
+                        current_messages.append({"role": "assistant", "content": reply})
+                        save_conversations(st.session_state.username)
+                        st.rerun()
     
-    selected_quick_reply = None
-    for btn_key, query in quick_reply_map.items():
-        if st.session_state.get(btn_key, False):
-            selected_quick_reply = query
-            st.session_state[btn_key] = False
-            break
-    
+    # 普通聊天输入框
     user_input = st.chat_input("请输入您的问题...", key=f"chat_input_{st.session_state.current_session}")
-    
-    # 如果点击了快捷按钮，使用快捷按钮的内容
-    if selected_quick_reply:
-        user_input = selected_quick_reply
     
     if user_input:
         with st.chat_message("user"):
@@ -1299,20 +1315,15 @@ else:
             
             # 检查是否是快捷回复
             if user_input == "关于锐瞳智能科技有限公司的项目简介" or user_input == "关于锐瞳智能科技有限公司的公司简介":
-                # 公司简介/项目简介：使用 AI 模型回复
                 is_intro_query = True
             elif user_input == "我想咨询合作事宜" or user_input == "我想加入锐瞳智能科技":
-                # 咨询合作/加入我们：固定回复
                 reply = "请联系中国计量大学光学与电子科技学院 XXX 老师\n联系电话：123123\n微信号：ruitong"
                 is_intro_query = False
             else:
                 is_intro_query = False
             
             if is_intro_query:
-                # 获取当前会话对话
                 recent = [m for m in current_messages[:-1] if m["role"] in ("user", "assistant")]
-                
-                # 优化：计算一次上下文
                 total_chars = sum(len(m.get("content", "")) for m in recent)
                 total_tokens_est = total_chars // 2
                 use_direct = len(recent) <= 5 and total_tokens_est <= 800
@@ -1327,7 +1338,6 @@ else:
                         summary = generate_session_summary(current_messages, st.session_state.current_session)
                         history_context = summary if summary else ""
                 
-                # Step 1: Query改写
                 search_query = user_input
                 if history_context or get_user_summaries(st.session_state.username):
                     user_facts = load_long_term_memory(st.session_state.username)
@@ -1344,12 +1354,10 @@ else:
                     if result:
                         search_query = result
                 
-                # Step 2: 检索上下文
                 with st.spinner("正在检索知识库..."):
                     text_docs = retrieve_context(search_query, st.session_state.username, history_context, need_full_retrieval=True)
                     context_str = "\n".join(text_docs) if text_docs else None
                 
-                # 流式输出回答
                 message_placeholder = st.empty()
                 for chunk in call_deepseek_api_stream(current_messages, context_str, api_key=current_api_key):
                     if chunk == "__DONE__":
@@ -1358,7 +1366,6 @@ else:
                     message_placeholder.write(reply + "▌")
                 message_placeholder.write(reply)
             else:
-                # 固定回复直接显示
                 st.write(reply)
 
         current_messages.append({"role": "assistant", "content": reply})
