@@ -144,7 +144,7 @@ def call_deepseek_api_retry(
 # ------------------- Streamlit 配置 -------------------
 st.set_page_config(
     page_title="锐瞳智能科技有限公司———小锐智能体",
-    page_icon="☆",
+    page_icon="🤖",
     layout="wide"
 )
 
@@ -158,7 +158,7 @@ CONVERSATIONS_DIR = "./conversations"
 CHROMA_DIR = "./models/ruitongkeji"
 HISTORY_CHROMA_DIR = "./models/history_vectorstore"  # 历史对话向量库
 MEMORY_MAX_FACTS = 30
-SESSION_SUMMARY_THRESHOLD = 8  # 触发摘要的对话轮数
+SESSION_SUMMARY_THRESHOLD = 10  # 触发摘要的对话轮数
 
 os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
 init_api_key_file()  # 初始化 API Key 文件路径
@@ -309,13 +309,13 @@ def generate_session_summary(session_messages, session_id):
         f"2. 用户的核心需求或问题\n"
         f"3. 达成的结论或关键信息\n"
         f"4. 用户的偏好或关注点（如有）\n\n"
-        f"对话内容：\n{dialogue_text[:3000]}"
+        f"对话内容：\n{dialogue_text}"
     )
     
     # 使用通用重试函数
     summary = call_deepseek_api_retry(
         prompt=prompt,
-        max_tokens=300,
+        max_tokens=500,
         timeout=30
     )
     
@@ -676,28 +676,40 @@ def load_bm25_index():
         return None, []
 
 # ------------------- 加载 bge-reranker -------------------
-@st.cache_resource
-def load_reranker():
-    try:
-        from modelscope import snapshot_download
-        from transformers import AutoTokenizer, AutoModelForSequenceClassification
-        model_dir = snapshot_download("BAAI/bge-reranker-base", cache_dir="./models")
-        tokenizer = AutoTokenizer.from_pretrained(model_dir)
-        model = AutoModelForSequenceClassification.from_pretrained(model_dir)
-        model.eval()
-        return tokenizer, model
-    except Exception as e:
-        return None, None
+# RERANKER_MODEL_PATH = "./models/BAAI/bge-reranker-base"
+
+# @st.cache_resource
+# def load_reranker():
+#     try:
+#         from transformers import AutoTokenizer, AutoModelForSequenceClassification
+#         
+#         # 检查本地模型是否存在
+#         if not os.path.exists(RERANKER_MODEL_PATH):
+#             st.warning(f"Reranker 模型本地路径不存在: {RERANKER_MODEL_PATH}")
+#             return None, None
+#         
+#         tokenizer = AutoTokenizer.from_pretrained(RERANKER_MODEL_PATH)
+#         model = AutoModelForSequenceClassification.from_pretrained(RERANKER_MODEL_PATH)
+#         model.eval()
+#         return tokenizer, model
+#     except Exception as e:
+#         st.warning(f"Reranker 加载失败: {e}")
+#         return None, None
 
 # BM25 加载（必要）
 with st.spinner("正在加载 BM25 索引..."):
     bm25_index, bm25_docs = load_bm25_index() if vectorstore else (None, [])
 
-# Reranker 加载（可选，加载失败不影响使用）
-with st.spinner("正在加载 Reranker 模型（首次可能需要下载，可跳过）..."):
-    reranker_tokenizer, reranker_model = load_reranker()
-    if reranker_tokenizer is None:
-        st.info("💡 Reranker 模型加载失败，将使用基础向量检索（可正常使用所有功能）")
+# Reranker 加载（已禁用）
+# with st.spinner("正在加载 Reranker 模型..."):
+#     reranker_tokenizer, reranker_model = load_reranker()
+#     if reranker_tokenizer is None:
+#         st.info("💡 Reranker 模型未加载，将使用基础向量检索（可正常使用所有功能）")
+#     else:
+#         st.success("✅ Reranker 模型加载成功")
+
+# 禁用 reranker
+reranker_tokenizer, reranker_model = None, None
 
 # ------------------- 用户选择/输入界面 -------------------
 if "username" not in st.session_state:
@@ -869,7 +881,7 @@ else:
         
         # Step 1: 如果有当前会话上下文，标记来源
         if history_context:
-            results.append(f"[当前会话上下文]\n{history_context[:500]}")
+            results.append(f"[当前会话上下文]\n{history_context[:800]}")
         
         # Step 2: 使用混合检索（摘要 + 会话细节 + RRF）
         if need_full_retrieval:
