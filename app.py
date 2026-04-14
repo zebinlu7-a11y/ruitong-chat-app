@@ -1314,21 +1314,23 @@ else:
         
         with st.chat_message("assistant"):
             # 获取当前会话对话
-            recent = [m for m in current_messages[:-1] if m["role"] in ("user", "assistant")]
+            recent = [m for m in current_messages if m["role"] in ("user", "assistant")]
             
-            # 优化：计算一次上下文，避免重复生成摘要
+            # 计算对话轮数和token数
             total_chars = sum(len(m.get("content", "")) for m in recent)
             total_tokens_est = total_chars // 2
-            use_direct = len(recent) <= 5 and total_tokens_est <= 800
+            
+            # 简化判断：轮数<=8 且 token<2000 时直接使用对话历史
+            use_direct = len(recent) <= 8 and total_tokens_est <= 2000
             
             if use_direct:
-                # 轮数<=5 且 token<800，用原始对话
+                # 用原始对话作为上下文
                 history_context = "\n".join(
                     f"{'用户' if m['role']=='user' else '助手'}: {m['content']}"
                     for m in recent
                 )
             else:
-                # 轮数多或token多，生成摘要
+                # 对话太长，生成摘要
                 with st.spinner("正在生成摘要..."):
                     summary = generate_session_summary(current_messages, st.session_state.current_session)
                     history_context = summary if summary else ""
@@ -1350,20 +1352,20 @@ else:
                 result = call_deepseek_api_retry(prompt=prompt, max_tokens=100, timeout=30)
                 if result:
                     search_query = result
-            
             # Step 2: 直接检索上下文
-            with st.spinner("正在检索知识库..."):
+            with st.spinner("🔍 正在检索知识库..."):
                 text_docs = retrieve_context(search_query, st.session_state.username, history_context, need_full_retrieval=True)
                 context_str = "\n".join(text_docs) if text_docs else None
             
             # 流式输出回答
             reply = ""
             message_placeholder = st.empty()
-            for chunk in call_deepseek_api_stream(current_messages, context_str, api_key=current_api_key):
-                if chunk == "__DONE__":
-                    break
-                reply += chunk
-                message_placeholder.write(reply + "▌")  # 闪烁光标效果
+            with st.spinner("💭 正在思考答案..."):
+                for chunk in call_deepseek_api_stream(current_messages, context_str, api_key=current_api_key):
+                    if chunk == "__DONE__":
+                        break
+                    reply += chunk
+                    message_placeholder.write(reply + "▌")  # 闪烁光标效果
             message_placeholder.write(reply)  # 最终显示
 
         current_messages.append({"role": "assistant", "content": reply})
