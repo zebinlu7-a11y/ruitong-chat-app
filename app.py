@@ -7,19 +7,74 @@ import json
 import re
 import time
 import requests
+import base64
 from datetime import datetime
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 import numpy as np
 
+# ------------------- API Key 配置文件（定义在路径配置之后） -------------------
+API_KEY_FILE = None  # 稍后初始化
+
+def init_api_key_file():
+    """初始化 API Key 文件路径"""
+    global API_KEY_FILE
+    API_KEY_FILE = os.path.join(CONVERSATIONS_DIR, "api_keys.json")
+
+def save_api_key(username, api_key):
+    """保存用户的 API Key（简单编码存储）"""
+    try:
+        # 简单 base64 编码（防止明文泄露，非真正加密）
+        encoded = base64.b64encode(api_key.encode()).decode()
+        if os.path.exists(API_KEY_FILE):
+            with open(API_KEY_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = {}
+        data[username] = encoded
+        with open(API_KEY_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        return True
+    except Exception as e:
+        st.error(f"保存 API Key 失败: {str(e)}")
+        return False
+
+def load_api_key(username):
+    """加载用户的 API Key"""
+    try:
+        if API_KEY_FILE and os.path.exists(API_KEY_FILE):
+            with open(API_KEY_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if username in data:
+                encoded = data[username]
+                return base64.b64decode(encoded.encode()).decode()
+    except Exception:
+        pass
+    return None
+
+def delete_api_key(username):
+    """删除用户的 API Key"""
+    try:
+        if API_KEY_FILE and os.path.exists(API_KEY_FILE):
+            with open(API_KEY_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if username in data:
+                del data[username]
+                with open(API_KEY_FILE, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False)
+        return True
+    except Exception:
+        return False
+
 # ------------------- 通用 API 调用函数（带重试+超时） -------------------
 def call_deepseek_api_retry(
     prompt,
-    max_tokens=500,
+    max_tokens=1000,
     temperature=0.1,
     max_retries=3,
     timeout=60,
-    is_json=False
+    is_json=False,
+    api_key=None
 ):
     """
     带重试和超时的 DeepSeek API 调用
@@ -31,12 +86,16 @@ def call_deepseek_api_retry(
         max_retries: 最大重试次数
         timeout: 超时时间（秒）
         is_json: 是否返回JSON格式
+        api_key: API Key（优先使用，否则使用全局变量）
     返回:
         生成的文本内容，失败返回 None
     """
+    # 优先使用传入的 api_key，否则使用全局变量
+    key = api_key if api_key else DEEPSEEK_API_KEY
+    
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+        "Authorization": f"Bearer {key}"
     }
     
     json_data = {
@@ -90,7 +149,7 @@ st.set_page_config(
 )
 
 # ------------------- DeepSeek API 配置 -------------------
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-503057a485af45328a38dd2b46475939")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = "deepseek-chat"
 DEEPSEEK_API_BASE = "https://api.deepseek.com/v1"
 
@@ -102,6 +161,7 @@ MEMORY_MAX_FACTS = 30
 SESSION_SUMMARY_THRESHOLD = 8  # 触发摘要的对话轮数
 
 os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
+init_api_key_file()  # 初始化 API Key 文件路径
 os.makedirs(HISTORY_CHROMA_DIR, exist_ok=True)
 
 # ------------------- 用户名验证 -------------------
@@ -679,7 +739,7 @@ else:
         save_conversations(st.session_state.username)
 
     # ------------------- DeepSeek API（流式输出） -------------------
-    def call_deepseek_api_stream(messages, context):
+    def call_deepseek_api_stream(messages, context, api_key=None):
         """流式生成回答的API调用"""
         try:
             messages_to_send = list(messages)
@@ -689,9 +749,12 @@ else:
                     "content": f"[检索到的相关知识库内容，仅供参考：{context[:60000]}]"
                 })
             
+            # 优先使用传入的 api_key，否则使用全局变量
+            key = api_key if api_key else DEEPSEEK_API_KEY
+            
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+                "Authorization": f"Bearer {key}"
             }
             
             json_data = {
@@ -939,8 +1002,77 @@ else:
             return result == "是" if result else False
         return False
 
-    # ------------------- 侧边栏：会话历史 -------------------
+    # ------------------- 侧边栏：API Key 管理 -------------------
     with st.sidebar:
+        st.header("🔑 API Key 设置")
+        
+        # 初始化 API Key 相关 session_state
+        if "api_key_input" not in st.session_state:
+            st.session_state.api_key_input = ""
+        if "show_api_key" not in st.session_state:
+            st.session_state.show_api_key = False
+        
+        # 尝试加载已保存的 API Key
+        saved_api_key = load_api_key(st.session_state.username)
+        
+        if saved_api_key:
+            st.success("✅ 已保存 API Key")
+            # 显示 API Key（可切换）
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("👁️ 显示" if not st.session_state.show_api_key else "🙈 隐藏", key="toggle_show_key"):
+                    st.session_state.show_api_key = not st.session_state.show_api_key
+                    st.rerun()
+            with col2:
+                if st.button("🗑️ 清除", key="clear_api_key"):
+                    delete_api_key(st.session_state.username)
+                    st.session_state.api_key_input = ""
+                    st.session_state.show_api_key = False
+                    st.rerun()
+            
+            # 显示/隐藏 API Key
+            display_key = saved_api_key[:8] + "..." + saved_api_key[-4:] if len(saved_api_key) > 12 else saved_api_key
+            if st.session_state.show_api_key:
+                st.text(f"当前 Key: {saved_api_key}")
+            else:
+                st.text(f"当前 Key: {display_key}")
+        
+        # API Key 输入
+        st.subheader("输入新的 API Key")
+        api_key_input = st.text_input(
+            "DeepSeek API Key",
+            value=st.session_state.api_key_input,
+            type="password" if not st.session_state.show_api_key else "default",
+            placeholder="sk-...",
+            key="api_key_text_input"
+        )
+        
+        col_save, col_cancel = st.columns(2)
+        with col_save:
+            if st.button("💾 保存", key="save_api_key_btn"):
+                if api_key_input and api_key_input.strip():
+                    if save_api_key(st.session_state.username, api_key_input.strip()):
+                        st.session_state.api_key_input = ""
+                        st.success("API Key 保存成功！")
+                        st.rerun()
+                else:
+                    st.warning("请输入有效的 API Key")
+        with col_cancel:
+            if st.button("🔄 重置", key="reset_api_key_btn"):
+                st.session_state.api_key_input = ""
+                st.rerun()
+        
+        st.divider()
+        
+        # 使用保存的或当前输入的 API Key
+        current_api_key = saved_api_key if saved_api_key else api_key_input
+        if current_api_key:
+            # 更新全局 API Key（确保所有 API 调用都能使用）
+            DEEPSEEK_API_KEY = current_api_key
+        else:
+            # 如果没有 API Key，设置默认值（让代码不报错，但实际调用会失败）
+            DEEPSEEK_API_KEY = ""
+        
         st.header(f"💬 {st.session_state.username} 的对话历史")
         if st.button("新建对话", key="new_chat"):
             # 对当前会话生成摘要并存入向量库
@@ -1053,6 +1185,21 @@ else:
 
     # ------------------- 聊天界面 -------------------
     st.title(f"💡锐瞳智能科技公司——小锐智能体（欢迎，{st.session_state.username}）")
+    
+    # 检查 API Key 是否已设置
+    saved_api_key = load_api_key(st.session_state.username)
+    if not saved_api_key and not st.session_state.get("api_key_input"):
+        st.warning("⚠️ 请先在左侧侧边栏设置 API Key 才能使用聊天功能")
+        st.stop()
+    
+    current_api_key = saved_api_key if saved_api_key else st.session_state.get("api_key_input", "")
+    if not current_api_key:
+        st.warning("⚠️ 请先在左侧侧边栏设置 API Key 才能使用聊天功能")
+        st.stop()
+    
+    # 更新全局 API Key
+    DEEPSEEK_API_KEY = current_api_key
+    
     current_messages = st.session_state.conversations[st.session_state.current_session]["messages"]
 
     for msg in current_messages:
@@ -1113,7 +1260,7 @@ else:
             # 流式输出回答
             reply = ""
             message_placeholder = st.empty()
-            for chunk in call_deepseek_api_stream(current_messages, context_str):
+            for chunk in call_deepseek_api_stream(current_messages, context_str, api_key=current_api_key):
                 if chunk == "__DONE__":
                     break
                 reply += chunk
