@@ -1249,31 +1249,38 @@ else:
         st.subheader("请选择您想了解的内容：")
         col1, col2 = st.columns(2)
         with col1:
-            st.button("🏢 公司简介", key="btn_company", use_container_width=True)
+            if st.button("🏢 公司简介", key="btn_company", use_container_width=True):
+                st.session_state.selected_btn_company = True
+                st.rerun()
         with col2:
-            st.button("📋 项目简介", key="btn_project", use_container_width=True)
+            if st.button("📋 项目简介", key="btn_project", use_container_width=True):
+                st.session_state.selected_btn_project = True
+                st.rerun()
         
         col3, col4 = st.columns(2)
         with col3:
-            st.button("💬 咨询合作", key="btn_consult", use_container_width=True)
+            if st.button("💬 咨询合作", key="btn_consult", use_container_width=True):
+                st.session_state.selected_btn_consult = True
+                st.rerun()
         with col4:
-            st.button("👥 加入我们", key="btn_join", use_container_width=True)
+            if st.button("👥 加入我们", key="btn_join", use_container_width=True):
+                st.session_state.selected_btn_join = True
+                st.rerun()
         
         st.divider()
     
     # 处理快捷按钮点击
     quick_reply_map = {
-        "btn_company": ("公司简介", "关于锐瞳智能科技有限公司的公司简介"),
-        "btn_project": ("项目简介", "关于锐瞳智能科技有限公司的项目简介"),
-        "btn_consult": ("咨询合作", "我想咨询合作事宜"),
-        "btn_join": ("加入我们", "我想加入锐瞳智能科技")
+        "selected_btn_company": "关于锐瞳智能科技有限公司的公司简介",
+        "selected_btn_project": "关于锐瞳智能科技有限公司的项目简介",
+        "selected_btn_consult": "我想咨询合作事宜",
+        "selected_btn_join": "我想加入锐瞳智能科技"
     }
     
     selected_quick_reply = None
-    for btn_key, (btn_name, query) in quick_reply_map.items():
+    for btn_key, query in quick_reply_map.items():
         if st.session_state.get(btn_key, False):
             selected_quick_reply = query
-            # 清空按钮状态
             st.session_state[btn_key] = False
             break
     
