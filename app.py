@@ -1229,6 +1229,10 @@ else:
     if "edit_text" not in st.session_state:
         st.session_state.edit_text = ""
 
+    # 初始化重新生成标记
+    if "regenerate" not in st.session_state:
+        st.session_state.regenerate = False
+
     # 显示消息
     for i, msg in enumerate(current_messages):
         if msg["role"] != "system":
@@ -1248,6 +1252,7 @@ else:
                         save_conversations(st.session_state.username)
                         st.session_state.edit_mode = False
                         st.session_state.editing_index = None
+                        st.session_state.regenerate = True
                         st.rerun()
                 with col2:
                     if st.button("❌ 取消", key=f"cancel_edit_{i}"):
@@ -1272,21 +1277,41 @@ else:
                                 if len(current_messages) > i + 1 and current_messages[-1]["role"] == "assistant":
                                     current_messages.pop()
                                 save_conversations(st.session_state.username)
+                                st.session_state.regenerate = True
                                 st.rerun()
                     # 在助手消息后显示重新生成按钮
                     elif msg["role"] == "assistant" and i == len(current_messages) - 1:
                         if st.button("🔄 重新生成", key="regenerate_last_btn"):
                             current_messages.pop()  # 删除助手回复
                             save_conversations(st.session_state.username)
+                            st.session_state.regenerate = True
                             st.rerun()
 
     # 输入框
     user_input = st.chat_input("请输入您的问题...", key=f"chat_input_{st.session_state.current_session}")
 
+    # 处理重新生成
+    if st.session_state.regenerate:
+        # 获取最后一条用户消息
+        user_msgs = [m for m in current_messages if m["role"] == "user"]
+        if user_msgs:
+            user_input = user_msgs[-1]["content"]
+            st.session_state.regenerate = False
+        else:
+            st.session_state.regenerate = False
+            user_input = None
+
     if user_input:
-        with st.chat_message("user"):
-            st.write(user_input)
-        current_messages.append({"role": "user", "content": user_input})
+        # 如果不是重新生成模式，添加用户消息
+        if not st.session_state.regenerate or not any(m["role"] == "user" and m["content"] == user_input for m in current_messages):
+            with st.chat_message("user"):
+                st.write(user_input)
+            current_messages.append({"role": "user", "content": user_input})
+        else:
+            # 重新生成模式，移除之前的助手回复
+            while current_messages and current_messages[-1]["role"] == "assistant":
+                current_messages.pop()
+        
         with st.chat_message("assistant"):
             # 获取当前会话对话
             recent = [m for m in current_messages[:-1] if m["role"] in ("user", "assistant")]
