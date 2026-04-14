@@ -1331,7 +1331,7 @@ else:
                 )
             else:
                 # 对话太长，生成摘要
-                with st.spinner("正在生成摘要..."):
+                with st.spinner("正在生成答案..."):
                     summary = generate_session_summary(current_messages, st.session_state.current_session)
                     history_context = summary if summary else ""
             
@@ -1352,20 +1352,20 @@ else:
                 result = call_deepseek_api_retry(prompt=prompt, max_tokens=100, timeout=30)
                 if result:
                     search_query = result
+            
             # Step 2: 直接检索上下文
-            with st.spinner("🔍 正在检索知识库..."):
+            with st.spinner("正在检索知识库..."):
                 text_docs = retrieve_context(search_query, st.session_state.username, history_context, need_full_retrieval=True)
                 context_str = "\n".join(text_docs) if text_docs else None
             
             # 流式输出回答
             reply = ""
             message_placeholder = st.empty()
-            with st.spinner("💭 正在思考答案..."):
-                for chunk in call_deepseek_api_stream(current_messages, context_str, api_key=current_api_key):
-                    if chunk == "__DONE__":
-                        break
-                    reply += chunk
-                    message_placeholder.write(reply + "▌")  # 闪烁光标效果
+            for chunk in call_deepseek_api_stream(current_messages, context_str, api_key=current_api_key):
+                if chunk == "__DONE__":
+                    break
+                reply += chunk
+                message_placeholder.write(reply + "▌")  # 闪烁光标效果
             message_placeholder.write(reply)  # 最终显示
 
         current_messages.append({"role": "assistant", "content": reply})
