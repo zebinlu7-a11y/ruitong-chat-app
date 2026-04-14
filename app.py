@@ -687,11 +687,17 @@ def load_reranker():
         model.eval()
         return tokenizer, model
     except Exception as e:
-        st.warning(f"Reranker 加载失败（将跳过重排序）: {e}")
         return None, None
 
-bm25_index, bm25_docs = load_bm25_index() if vectorstore else (None, [])
-reranker_tokenizer, reranker_model = load_reranker()
+# BM25 加载（必要）
+with st.spinner("正在加载 BM25 索引..."):
+    bm25_index, bm25_docs = load_bm25_index() if vectorstore else (None, [])
+
+# Reranker 加载（可选，加载失败不影响使用）
+with st.spinner("正在加载 Reranker 模型（首次可能需要下载，可跳过）..."):
+    reranker_tokenizer, reranker_model = load_reranker()
+    if reranker_tokenizer is None:
+        st.info("💡 Reranker 模型加载失败，将使用基础向量检索（可正常使用所有功能）")
 
 # ------------------- 用户选择/输入界面 -------------------
 if "username" not in st.session_state:
